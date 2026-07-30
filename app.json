@@ -1,0 +1,54 @@
+{
+  "configVersion": "v3",
+  "app": {
+    "appType": "app",
+    "version": {
+      "code": 1,
+      "name": "1.0.0"
+    },
+    "appId": 1000001,
+    "appName": "WristTrack",
+    "_pikeCompatibled": 1,
+    "icon": "icon.png",
+    "vender": "Community",
+    "description": "A serverless wrist timer for Toggl Track"
+  },
+  "runtime": {
+    "apiVersion": {
+      "compatible": "4.4",
+      "target": "4.4",
+      "minVersion": "4.4"
+    }
+  },
+  "targets": {
+    "bip-max": {
+      "module": {
+        "page": {
+          "pages": ["page/home/index.page"]
+        },
+        "app-side": {
+          "path": "app-side/index"
+        },
+        "setting": {
+          "path": "setting/index"
+        }
+      },
+      "platforms": [
+        {
+          "st": "s",
+          "sr": "w432",
+          "dw": 432
+        }
+      ],
+      "designWidth": 432
+    }
+  },
+  "permissions": [],
+  "i18n": {
+    "en-US": {
+      "name": "WristTrack"
+    }
+  },
+  "defaultLanguage": "en-US",
+  "debug": false
+}
