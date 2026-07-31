@@ -8,7 +8,10 @@
     "test": "node --test",
     "build": "zeus build",
     "dev": "zeus dev",
-    "preview": "zeus preview"
+    "preview": "zeus preview",
+    "screens": "node tools/screenshots.mjs",
+    "sim": "tools/sim.sh",
+    "shot": "tools/shot.sh"
   },
   "license": "MIT",
   "dependencies": {

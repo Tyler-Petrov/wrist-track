@@ -6,7 +6,9 @@ import {
   createTogglClient,
   friendlyError,
   makeStartPayload,
+  makeUpdatePayload,
   publicEntry,
+  recentEntriesPath,
   reduceAccount
 } from './toggl'
 
@@ -113,7 +115,9 @@ async function getStatus() {
   const account = await getAccount(token)
   const current = await operationClient.request('/me/time_entries/current')
   assertCurrentToken(token)
-  const recent = current ? [] : await operationClient.request('/me/time_entries')
+  // History is fetched even while a timer runs, because the watch offers it as
+  // the list to re-label a running entry from.
+  const recent = await operationClient.request(recentEntriesPath())
   assertCurrentToken(token)
 
   return {
@@ -122,6 +126,28 @@ async function getStatus() {
     running: publicEntry(current, account),
     presets: buildPresets(asArray(recent), account, getPreferences())
   }
+}
+
+async function updateTimer(params) {
+  return runMutation(async () => {
+    const token = currentToken()
+    const operationClient = createTogglClient(fetch, () => token)
+    const entryId = Number(params.entryId)
+    const workspaceId = Number(params.workspaceId)
+    if (!entryId || !workspaceId) throw new Error('That timer is no longer running.')
+
+    assertCurrentToken(token)
+    await operationClient.request(`/workspaces/${workspaceId}/time_entries/${entryId}`, {
+      method: 'PUT',
+      body: makeUpdatePayload({
+        description: params.description,
+        projectId: params.projectId,
+        workspaceId
+      })
+    })
+    assertCurrentToken(token)
+    return getStatus()
+  })
 }
 
 async function startTimer(params) {
@@ -141,17 +167,22 @@ async function startTimer(params) {
     const created = await operationClient.request(`/workspaces/${workspaceId}/time_entries`, {
       method: 'POST',
       body: makeStartPayload({
-        description: params.description || preferences.description,
+        // A preset carrying an empty description is deliberate — many Toggl
+        // entries are project-only — so only fall back when none was sent.
+        description: params.description === undefined ? preferences.description : params.description,
         projectId: params.projectId,
         workspaceId
       })
     })
     assertCurrentToken(token)
+    // Carry the history across so the running screen can offer it for editing.
+    const recent = await operationClient.request(recentEntriesPath())
+    assertCurrentToken(token)
     return {
       configured: true,
       userName: account.fullname,
       running: publicEntry(created, account),
-      presets: buildPresets([], account, preferences)
+      presets: buildPresets(asArray(recent), account, preferences)
     }
   })
 }
@@ -172,16 +203,21 @@ async function stopTimer(params) {
     }
 
     assertCurrentToken(token)
-    const stopped = await operationClient.request(`/workspaces/${workspaceId}/time_entries/${entryId}/stop`, {
+    await operationClient.request(`/workspaces/${workspaceId}/time_entries/${entryId}/stop`, {
       method: 'PATCH'
     })
     assertCurrentToken(token)
+
+    // Re-read the recent entries so the watch lands on a populated preset list
+    // instead of only the entry that was just stopped.
     const account = await getAccount(token)
+    const recent = await operationClient.request(recentEntriesPath())
+    assertCurrentToken(token)
     return {
       configured: true,
       userName: account.fullname,
       running: null,
-      presets: buildPresets(stopped ? [stopped] : [], account, getPreferences())
+      presets: buildPresets(asArray(recent), account, getPreferences())
     }
   })
 }
@@ -197,7 +233,9 @@ AppSideService(
             ? startTimer(req.params || {})
             : req.method === 'STOP'
               ? stopTimer(req.params || {})
-              : Promise.reject(new Error('Unknown request.'))
+              : req.method === 'UPDATE'
+                ? updateTimer(req.params || {})
+                : Promise.reject(new Error('Unknown request.'))
 
       withResponseTimeout(action)
         .then((result) => res(null, { result }))
@@ -208,15 +246,18 @@ AppSideService(
         settingsLib.removeItem(ACCOUNT_KEY)
         settingsLib.removeItem('connectionError')
         const token = String(newValue || '').trim()
-        if (token) {
-          syncAccount(token)
-            .then(() => this.call({ method: 'SETTINGS_CHANGED' }))
-            .catch((error) => {
-              if (currentToken() !== token) return
-              settingsLib.setItem('connectionError', friendlyError(error))
-              this.call({ method: 'SETTINGS_CHANGED' })
-            })
+        if (!token) {
+          // Disconnected in Zepp: let the watch fall back to its setup screen.
+          this.call({ method: 'SETTINGS_CHANGED' })
+          return
         }
+        syncAccount(token)
+          .then(() => this.call({ method: 'SETTINGS_CHANGED' }))
+          .catch((error) => {
+            if (currentToken() !== token) return
+            settingsLib.setItem('connectionError', friendlyError(error))
+            this.call({ method: 'SETTINGS_CHANGED' })
+          })
       } else if (['defaultDescription', 'workspaceId', 'projectId'].includes(key)) {
         this.call({ method: 'SETTINGS_CHANGED' })
       }

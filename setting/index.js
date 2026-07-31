@@ -23,6 +23,10 @@ function card(children) {
   )
 }
 
+function statusLine(text, color) {
+  return Text({ paragraph: true, style: { color, margin: '6px 0 12px' } }, text)
+}
+
 AppSettingsPage({
   build(props) {
     const { settingsStorage } = props
@@ -36,6 +40,14 @@ AppSettingsPage({
       : []
     const error = settingsStorage.getItem('connectionError')
 
+    const status = account
+      ? statusLine(`Signed in as ${account.fullname}`, '#13795b')
+      : error
+        ? statusLine(error, '#b3261e')
+        : hasToken
+          ? statusLine('Checking your token. Open WristTrack on the watch to retry.', '#5b6472')
+          : statusLine('Open your Toggl profile, copy the API token, then paste it below.', '#5b6472')
+
     return View(
       { style: { background: '#f5f6f8', padding: '16px' } },
       [
@@ -46,13 +58,11 @@ AppSettingsPage({
         Text({
           paragraph: true,
           style: { color: '#5b6472', marginBottom: '16px' }
-        }, 'Direct Toggl Track control for your Amazfit Bip Max. No account or central server is used by this app.'),
+        }, 'Start and stop Toggl Track timers from your watch. Your phone talks to Toggl directly; this app has no server of its own.'),
+
         card([
           Text({ bold: true, paragraph: true }, hasToken ? 'Toggl connected' : 'Connect Toggl'),
-          Text({
-            paragraph: true,
-            style: { color: hasToken ? '#13795b' : '#5b6472', margin: '6px 0 12px' }
-          }, account ? `Signed in as ${account.fullname}` : error || (hasToken ? 'Checking your token. Open the watch app to retry.' : 'Open your Toggl profile, copy the API token, then paste it below.')),
+          status,
           Link({ source: PROFILE_URL }, [
             Text({ paragraph: true, style: { color: '#e64a19', marginBottom: '12px' } }, 'Open Toggl profile to get token →')
           ]),
@@ -79,9 +89,14 @@ AppSettingsPage({
               }
             })
         ]),
+
         hasToken &&
           card([
             Text({ bold: true, paragraph: true }, 'Timer defaults'),
+            Text({
+              paragraph: true,
+              style: { color: '#5b6472', margin: '6px 0 12px' }
+            }, 'The watch offers your five most recent Toggl entries. These defaults are only used as a starting point when there is no history yet.'),
             TextInput({
               label: 'Default description',
               value: settingsStorage.getItem('defaultDescription') || 'Working',
@@ -109,9 +124,10 @@ AppSettingsPage({
                 onChange: (value) => settingsStorage.setItem('projectId', String(value))
               })
           ]),
+
         card([
           Text({ bold: true, paragraph: true }, 'How credentials are handled'),
-          Text({ paragraph: true, style: { color: '#5b6472', marginTop: '6px' } }, 'Your token remains in Zepp settings on this phone. The Side Service sends it only to api.track.toggl.com over HTTPS. The watch receives timer details, never the token. Toggl does not currently offer OAuth or QR device sign-in for third-party apps.')
+          Text({ paragraph: true, style: { color: '#5b6472', marginTop: '6px' } }, 'Your token stays in Zepp settings on this phone. It is sent only to api.track.toggl.com over HTTPS. The watch receives timer details, never the token. Toggl does not currently offer OAuth or QR device sign-in for third-party apps, so a personal token is the only safe option.')
         ])
       ].filter(Boolean)
     )

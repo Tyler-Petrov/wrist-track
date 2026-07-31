@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WristTrack — 10 face directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;800&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#e6ecf2;
+    --paper-2:#dbe3ec;
+    --ink:#0f2036;
+    --ink-2:#41566e;
+    --rule:#b9c7d6;
+    --grid:#cfdae6;
+    --amber:#b4520d;
+    --ok:#186b4e;
+    --panel-w:432px;
+    --panel-h:514px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/100% 28px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/28px 100%,
+      var(--paper);
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 24px 96px}
+
+  header{border-bottom:2px solid var(--ink);padding-bottom:20px;margin-bottom:8px}
+  .eyebrow{
+    font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--ink-2);margin:0 0 10px
+  }
+  h1{
+    font-family:'Archivo',sans-serif;font-weight:800;font-size:clamp(30px,5vw,52px);
+    line-height:.98;letter-spacing:-.02em;margin:0 0 14px;max-width:15ch
+  }
+  .lede{margin:0;max-width:62ch;font-size:15.5px;line-height:1.6;color:var(--ink-2)}
+  .lede b{color:var(--ink);font-weight:600}
+
+  .controls{
+    position:sticky;top:0;z-index:20;margin:22px 0 30px;padding:12px 0;
+    background:var(--paper);border-bottom:1px solid var(--rule);
+    display:flex;gap:10px;align-items:center;flex-wrap:wrap
+  }
+  .seg{display:flex;border:1.5px solid var(--ink);border-radius:2px;overflow:hidden}
+  .seg button{
+    font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.1em;
+    text-transform:uppercase;padding:8px 14px;border:0;background:transparent;
+    color:var(--ink);cursor:pointer
+  }
+  .seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+  .seg button:focus-visible{outline:3px solid var(--amber);outline-offset:-3px}
+  .hint{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-2)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:34px}
+
+  .card{background:transparent}
+  .card__head{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+  .num{
+    font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:13px;
+    color:var(--paper);background:var(--ink);padding:2px 7px;border-radius:2px
+  }
+  .name{font-family:'Archivo',sans-serif;font-weight:600;font-size:19px;letter-spacing:-.01em}
+  .card__note{margin:0 0 14px;font-size:13.5px;line-height:1.55;color:var(--ink-2);min-height:4.4em}
+
+  /* the device */
+  .device{
+    width:100%;max-width:var(--panel-w);aspect-ratio:432/514;position:relative;
+    border-radius:calc(106px / 432 * 100%);
+    background:#000;overflow:hidden;
+    box-shadow:0 0 0 7px #171d24, 0 0 0 8.5px #333d49, 0 14px 30px rgba(15,32,54,.28);
+    container-type:inline-size;
+  }
+  .device svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  .spec{
+    margin-top:12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;
+    color:var(--ink-2);display:flex;flex-wrap:wrap;gap:4px 10px;
+    border-top:1px solid var(--rule);padding-top:9px
+  }
+  .spec b{color:var(--ink);font-weight:500}
+  .flag{
+    display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:11px;
+    padding:1px 6px;border-radius:2px;letter-spacing:.04em
+  }
+  .flag--ok{background:rgba(24,107,78,.13);color:var(--ok)}
+  .flag--asset{background:rgba(180,82,13,.13);color:var(--amber)}
+
+  footer{margin-top:64px;border-top:2px solid var(--ink);padding-top:18px;
+    font-size:14px;line-height:1.6;color:var(--ink-2);max-width:70ch}
+  footer b{color:var(--ink)}
+  code{font-family:'IBM Plex Mono',monospace;font-size:.92em;background:var(--paper-2);padding:1px 5px;border-radius:2px}
+
+  @media (prefers-reduced-motion:no-preference){
+    .device{transition:box-shadow .18s ease}
+  }
+  .card:focus-within .device,.card:hover .device{box-shadow:0 0 0 7px #171d24,0 0 0 8.5px var(--amber),0 14px 30px rgba(15,32,54,.3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <p class="eyebrow">WristTrack · Amazfit Bip Max · 432 × 514</p>
+  <h1>Ten ways the timer could look.</h1>
+  <p class="lede">Every face below is drawn from the <b>same primitives Zepp OS actually gives us</b> — solid rectangles, text, buttons and arcs. No gradients, no shadows, no custom fonts for anything that changes. So what you pick is what gets built; there is no mockup-to-reality gap to negotiate. Panels are shown at true pixel proportions with the Bip Max's 106px corner radius. On the wrist this is about 33 × 40 mm, so <b>everything is designed to be read in one glance, at arm's length</b>.</p>
+</header>
+
+<div class="controls">
+  <div class="seg" role="group" aria-label="Timer state">
+    <button id="btn-running" aria-pressed="true">Running</button>
+    <button id="btn-ready" aria-pressed="false">Ready</button>
+  </div>
+  <span class="hint">Switch state to compare — the hard part is looking good in both.</span>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<footer>
+  <p>Tell me a number and I'll build it. Mixing is fine too — <b>“7, but with 3's ring”</b> is a perfectly good answer.</p>
+  <p><span class="flag flag--ok">native</span> uses only built-in widgets. <span class="flag flag--asset">asset</span> needs a small PNG shipped with the app — still fully offline, just an extra file.</p>
+</footer>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// A tiny renderer over the same widget model Zepp OS exposes, so each face is
+// literally a list of primitives that maps 1:1 onto page/home/index.page.js.
+// ---------------------------------------------------------------------------
+const W = 432, H = 514;
+const FACE = "'Inter',system-ui,sans-serif"; // stands in for the watch system font
+
+const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function rect({x,y,w,h,r=0,c}){
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="${c}"/>`;
+}
+function text({x,y,w,h,size,c,t,weight=600,align='center',mono=false,track=0}){
+  const anchor = align==='center'?'middle':align==='right'?'end':'start';
+  const tx = align==='center'? x+w/2 : align==='right'? x+w : x;
+  const family = mono ? "'IBM Plex Mono',monospace" : FACE;
+  return `<text x="${tx}" y="${y+h/2}" fill="${c}" font-size="${size}" font-weight="${weight}"
+    font-family="${family}" text-anchor="${anchor}" dominant-baseline="central"
+    letter-spacing="${track}">${esc(t)}</text>`;
+}
+function btn({x,y,w,h,r=30,c,tc='#fff',size=30,t,weight=700}){
+  return rect({x,y,w,h,r,c}) + text({x,y,w,h,size,c:tc,t,weight});
+}
+function arc({cx,cy,r,width,from,to,c,cap='round'}){
+  const pol=(a)=>[cx+r*Math.cos((a-90)*Math.PI/180), cy+r*Math.sin((a-90)*Math.PI/180)];
+  const [x1,y1]=pol(from),[x2,y2]=pol(to);
+  const large = (to-from)%360 > 180 ? 1 : 0;
+  return `<path d="M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}" fill="none"
+    stroke="${c}" stroke-width="${width}" stroke-linecap="${cap}"/>`;
+}
+const circle = ({cx,cy,r,c}) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${c}"/>`;
+
+// Shared content so the faces differ by design, not by copy.
+const D = {
+  desc:'Gutter clean', proj:'Home Maintenance', time:'01:24:07',
+  mins:84, next:'Invoicing', nextProj:'Admin'
+};
+
+// --- the ten directions ----------------------------------------------------
+const DESIGNS = [
+{
+  n:'Baseline', native:true,
+  note:'What is on your watch now: a tonal card, centred stack, one primary action. Safe and legible; nothing about it says stopwatch.',
+  run:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#000'}),
+    text({x:34,y:26,w:364,h:28,size:19,c:'#5c626d',t:'WRISTTRACK'}),
+    rect({x:34,y:64,w:364,h:236,r:30,c:'#15171c'}),
+    text({x:34,y:86,w:364,h:26,size:20,c:'#ff5c3b',t:'RUNNING'}),
+    text({x:34,y:122,w:364,h:76,size:62,c:'#fff',t:D.time,weight:700}),
+    text({x:34,y:210,w:364,h:34,size:26,c:'#fff',t:D.desc}),
+    text({x:34,y:248,w:364,h:28,size:20,c:'#8b929e',t:D.proj}),
+    btn({x:34,y:322,w:364,h:92,c:'#ff5c3b',t:'STOP TIMER'}),
+    btn({x:34,y:424,w:168,h:54,r:24,c:'#232730',size:22,t:'EDIT'}),
+    btn({x:230,y:424,w:168,h:54,r:24,c:'#232730',size:22,t:'REFRESH'})
+  ],
+  ready:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#000'}),
+    text({x:34,y:26,w:364,h:28,size:19,c:'#5c626d',t:'WRISTTRACK'}),
+    rect({x:34,y:64,w:364,h:170,r:30,c:'#15171c'}),
+    text({x:34,y:84,w:364,h:26,size:20,c:'#8b929e',t:'READY'}),
+    text({x:34,y:124,w:364,h:46,size:34,c:'#fff',t:D.desc,weight:700}),
+    text({x:34,y:178,w:364,h:30,size:21,c:'#8b929e',t:D.proj}),
+    btn({x:34,y:250,w:76,h:60,r:20,c:'#232730',size:28,t:'‹'}),
+    text({x:110,y:250,w:212,h:60,size:22,c:'#8b929e',t:'1 / 5'}),
+    btn({x:322,y:250,w:76,h:60,r:20,c:'#232730',size:28,t:'›'}),
+    btn({x:34,y:322,w:364,h:92,c:'#ff5c3b',t:'START TIMER'}),
+    btn({x:116,y:424,w:200,h:54,r:24,c:'#232730',size:22,t:'REFRESH'})
+  ]
+},
+{
+  n:'Signal', native:true,
+  note:'The screen itself is the status. Running floods the panel with colour; idle goes black. You know from your peripheral vision, before you have read a word.',
+  run:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#ff5c3b'}),
+    text({x:34,y:44,w:364,h:30,size:21,c:'#4a1408',t:'TRACKING',weight:800,track:6}),
+    text({x:20,y:150,w:392,h:96,size:82,c:'#1a0600',t:D.time,weight:800}),
+    text({x:34,y:262,w:364,h:38,size:29,c:'#3d1004',t:D.desc,weight:700}),
+    text({x:34,y:302,w:364,h:28,size:20,c:'#6d2410',t:D.proj}),
+    btn({x:34,y:372,w:364,h:100,r:34,c:'#1a0600',tc:'#ff8e73',t:'STOP'})
+  ],
+  ready:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#000'}),
+    text({x:34,y:44,w:364,h:30,size:21,c:'#4c525c',t:'NOT TRACKING',weight:800,track:6}),
+    text({x:34,y:170,w:364,h:52,size:40,c:'#fff',t:D.desc,weight:800}),
+    text({x:34,y:226,w:364,h:30,size:21,c:'#7b828d',t:D.proj}),
+    btn({x:34,y:288,w:76,h:56,r:18,c:'#1a1d22',size:26,t:'‹'}),
+    text({x:110,y:288,w:212,h:56,size:20,c:'#6b727d',t:'1 / 5'}),
+    btn({x:322,y:288,w:76,h:56,r:18,c:'#1a1d22',size:26,t:'›'}),
+    btn({x:34,y:372,w:364,h:100,r:34,c:'#ff5c3b',t:'START'})
+  ]
+},
+{
+  n:'Ring', native:true,
+  note:'An arc sweeps once an hour, so elapsed time has a shape as well as a number. The one direction where a glance gives you duration without reading digits.',
+  run:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#000'}),
+    text({x:34,y:22,w:364,h:26,size:18,c:'#5c626d',t:D.proj}),
+    arc({cx:216,cy:210,r:132,width:16,from:0,to:359.9,c:'#191c22'}),
+    arc({cx:216,cy:210,r:132,width:16,from:0,to:(D.mins%60)/60*360,c:'#ff5c3b'}),
+    text({x:66,y:168,w:300,h:70,size:56,c:'#fff',t:D.time,weight:700}),
+    text({x:66,y:236,w:300,h:28,size:20,c:'#8b929e',t:D.desc}),
+    btn({x:34,y:378,w:364,h:96,r:32,c:'#ff5c3b',t:'STOP TIMER'})
+  ],
+  ready:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#000'}),
+    text({x:34,y:22,w:364,h:26,size:18,c:'#5c626d',t:'READY'}),
+    arc({cx:216,cy:176,r:106,width:14,from:0,to:359.9,c:'#171a20'}),
+    text({x:84,y:142,w:264,h:44,size:30,c:'#fff',t:D.desc,weight:700}),
+    text({x:84,y:186,w:264,h:26,size:18,c:'#8b929e',t:D.proj}),
+    btn({x:44,y:302,w:64,h:56,r:18,c:'#232730',size:26,t:'‹'}),
+    text({x:108,y:302,w:216,h:56,size:20,c:'#6b727d',t:'1 / 5'}),
+    btn({x:324,y:302,w:64,h:56,r:18,c:'#232730',size:26,t:'›'}),
+    btn({x:34,y:378,w:364,h:96,r:32,c:'#ff5c3b',t:'START TIMER'})
+  ]
+},
+{
+  n:'Job sheet', native:true,
+  note:'Borrowed from the paperwork this app replaces: left-aligned rows, hairline rules, monospaced figures. Reads like a line on an invoice, which is where the time ends up.',
+  run:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#0b0d10'}),
+    text({x:40,y:34,w:352,h:24,size:16,c:'#6b737f',t:'JOB',align:'left',mono:true,track:3}),
+    text({x:40,y:34,w:352,h:24,size:16,c:'#ff7a4d',t:'ON THE CLOCK',align:'right',mono:true,track:3}),
+    rect({x:40,y:66,w:352,h:2,c:'#242a33'}),
+    text({x:40,y:82,w:352,h:44,size:31,c:'#fff',t:D.desc,align:'left',weight:700}),
+    text({x:40,y:128,w:352,h:28,size:19,c:'#8b929e',t:D.proj,align:'left'}),
+    rect({x:40,y:172,w:352,h:1,c:'#1c2129'}),
+    text({x:40,y:186,w:352,h:24,size:15,c:'#6b737f',t:'ELAPSED',align:'left',mono:true,track:3}),
+    text({x:40,y:214,w:352,h:78,size:64,c:'#fff',t:D.time,align:'left',mono:true,weight:500}),
+    rect({x:40,y:302,w:352,h:1,c:'#1c2129'}),
+    btn({x:40,y:330,w:352,h:88,r:8,c:'#ff5c3b',t:'STOP'}),
+    btn({x:40,y:430,w:170,h:50,r:8,c:'#171b21',size:19,t:'EDIT'}),
+    btn({x:222,y:430,w:170,h:50,r:8,c:'#171b21',size:19,t:'REFRESH'})
+  ],
+  ready:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#0b0d10'}),
+    text({x:40,y:34,w:352,h:24,size:16,c:'#6b737f',t:'NEXT JOB',align:'left',mono:true,track:3}),
+    text({x:40,y:34,w:352,h:24,size:16,c:'#6b737f',t:'1 / 5',align:'right',mono:true,track:3}),
+    rect({x:40,y:66,w:352,h:2,c:'#242a33'}),
+    text({x:40,y:88,w:352,h:48,size:33,c:'#fff',t:D.desc,align:'left',weight:700}),
+    text({x:40,y:138,w:352,h:28,size:19,c:'#8b929e',t:D.proj,align:'left'}),
+    rect({x:40,y:182,w:352,h:1,c:'#1c2129'}),
+    text({x:40,y:198,w:352,h:24,size:15,c:'#4e5661',t:'THEN',align:'left',mono:true,track:3}),
+    text({x:40,y:224,w:352,h:30,size:21,c:'#6b737f',t:D.next+' · '+D.nextProj,align:'left'}),
+    btn({x:40,y:284,w:170,h:52,r:8,c:'#171b21',size:22,t:'‹ BACK'}),
+    btn({x:222,y:284,w:170,h:52,r:8,c:'#171b21',size:22,t:'NEXT ›'}),
+    btn({x:40,y:360,w:352,h:88,r:8,c:'#ff5c3b',t:'START'})
+  ]
+},
+{
+  n:'Spine', native:true,
+  note:'The project colour becomes a bar down the edge, so each job is recognisable before you read it. Strongest option if you track several projects a day.',
+  run:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#07080a'}),
+    rect({x:34,y:70,w:14,h:374,r:7,c:'#f2b705'}),
+    text({x:70,y:74,w:322,h:26,size:18,c:'#f2b705',t:'RUNNING',align:'left',weight:700,track:4}),
+    text({x:70,y:110,w:322,h:46,size:33,c:'#fff',t:D.desc,align:'left',weight:700}),
+    text({x:70,y:158,w:322,h:28,size:19,c:'#7d858f',t:D.proj,align:'left'}),
+    text({x:70,y:206,w:322,h:80,size:66,c:'#fff',t:D.time,align:'left',weight:700}),
+    btn({x:70,y:312,w:322,h:92,r:26,c:'#ff5c3b',t:'STOP TIMER'}),
+    btn({x:70,y:418,w:150,h:50,r:16,c:'#181b20',size:19,t:'EDIT'}),
+    btn({x:242,y:418,w:150,h:50,r:16,c:'#181b20',size:19,t:'REFRESH'})
+  ],
+  ready:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#07080a'}),
+    rect({x:34,y:70,w:14,h:374,r:7,c:'#3d434c'}),
+    text({x:70,y:74,w:322,h:26,size:18,c:'#7d858f',t:'READY',align:'left',weight:700,track:4}),
+    text({x:70,y:118,w:322,h:50,size:35,c:'#fff',t:D.desc,align:'left',weight:700}),
+    text({x:70,y:172,w:322,h:28,size:19,c:'#7d858f',t:D.proj,align:'left'}),
+    btn({x:70,y:230,w:150,h:54,r:16,c:'#181b20',size:24,t:'‹'}),
+    btn({x:242,y:230,w:150,h:54,r:16,c:'#181b20',size:24,t:'›'}),
+    text({x:70,y:294,w:322,h:26,size:18,c:'#4e5661',t:'1 OF 5',align:'left',mono:true,track:3}),
+    btn({x:70,y:340,w:322,h:92,r:26,c:'#ff5c3b',t:'START TIMER'})
+  ]
+},
+{
+  n:'Board', native:true,
+  note:'Departure-board vernacular — amber monospace on black, fixed rows. Unmistakably a clocking-in device, and the most readable of the lot in bright sun.',
+  run:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#000'}),
+    rect({x:0,y:0,w:W,h:60,c:'#0e0b06'}),
+    text({x:34,y:16,w:364,h:28,size:19,c:'#ffab2e',t:'● ON THE CLOCK',mono:true,weight:500,track:2}),
+    text({x:24,y:96,w:384,h:104,size:84,c:'#ffab2e',t:D.time,mono:true,weight:500}),
+    rect({x:34,y:216,w:364,h:2,c:'#3a2c11'}),
+    text({x:34,y:230,w:364,h:36,size:26,c:'#f6f0e2',t:D.desc,mono:true,weight:500}),
+    text({x:34,y:268,w:364,h:28,size:18,c:'#8a7a55',t:D.proj,mono:true}),
+    btn({x:34,y:330,w:364,h:96,r:6,c:'#ffab2e',tc:'#1a1103',t:'STOP',size:32}),
+    btn({x:34,y:438,w:364,h:44,r:6,c:'#171308',tc:'#8a7a55',t:'EDIT   ·   REFRESH',size:18})
+  ],
+  ready:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#000'}),
+    rect({x:0,y:0,w:W,h:60,c:'#0b0b0b'}),
+    text({x:34,y:16,w:364,h:28,size:19,c:'#6f7681',t:'○ OFF THE CLOCK',mono:true,weight:500,track:2}),
+    text({x:34,y:120,w:364,h:26,size:17,c:'#5d646e',t:'NEXT',mono:true,track:3}),
+    text({x:34,y:154,w:364,h:48,size:32,c:'#f6f0e2',t:D.desc,mono:true,weight:500}),
+    text({x:34,y:204,w:364,h:30,size:19,c:'#7c838e',t:D.proj,mono:true}),
+    rect({x:34,y:250,w:364,h:2,c:'#22262c'}),
+    btn({x:34,y:270,w:174,h:52,r:6,c:'#14171b',tc:'#9aa2ad',size:22,t:'‹ PREV'}),
+    btn({x:224,y:270,w:174,h:52,r:6,c:'#14171b',tc:'#9aa2ad',size:22,t:'NEXT ›'}),
+    btn({x:34,y:346,w:364,h:96,r:6,c:'#ffab2e',tc:'#1a1103',t:'START',size:32})
+  ]
+},
+{
+  n:'Meter', native:true,
+  note:'A bar that fills across the hour and resets, plus the digits. Duration you can read at a distance, without the space an arc costs.',
+  run:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#0a0c0f'}),
+    text({x:34,y:30,w:364,h:26,size:18,c:'#5c626d',t:D.proj,track:2}),
+    text({x:24,y:84,w:384,h:96,size:78,c:'#fff',t:D.time,weight:700}),
+    rect({x:34,y:196,w:364,h:18,r:9,c:'#1a1e25'}),
+    rect({x:34,y:196,w:364*(D.mins%60)/60,h:18,r:9,c:'#ff5c3b'}),
+    text({x:34,y:222,w:364,h:24,size:16,c:'#4e5661',t:'MINUTE '+(D.mins%60)+' OF THIS HOUR',mono:true,track:2}),
+    text({x:34,y:266,w:364,h:40,size:30,c:'#fff',t:D.desc,weight:600}),
+    btn({x:34,y:330,w:364,h:92,r:22,c:'#ff5c3b',t:'STOP TIMER'}),
+    btn({x:34,y:432,w:168,h:50,r:16,c:'#1a1e25',size:19,t:'EDIT'}),
+    btn({x:230,y:432,w:168,h:50,r:16,c:'#1a1e25',size:19,t:'REFRESH'})
+  ],
+  ready:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#0a0c0f'}),
+    text({x:34,y:30,w:364,h:26,size:18,c:'#5c626d',t:'READY',track:2}),
+    rect({x:34,y:92,w:364,h:18,r:9,c:'#1a1e25'}),
+    text({x:34,y:140,w:364,h:52,size:36,c:'#fff',t:D.desc,weight:700}),
+    text({x:34,y:196,w:364,h:30,size:20,c:'#7d858f',t:D.proj}),
+    btn({x:34,y:250,w:76,h:56,r:18,c:'#1a1e25',size:26,t:'‹'}),
+    text({x:110,y:250,w:212,h:56,size:19,c:'#5c626d',t:'1 / 5',mono:true}),
+    btn({x:322,y:250,w:76,h:56,r:18,c:'#1a1e25',size:26,t:'›'}),
+    btn({x:34,y:330,w:364,h:92,r:22,c:'#ff5c3b',t:'START TIMER'}),
+    btn({x:116,y:432,w:200,h:50,r:16,c:'#1a1e25',size:19,t:'REFRESH'})
+  ]
+},
+{
+  n:'Stack', native:true,
+  note:'Recent jobs stay on screen instead of hiding behind arrows, in Toggl\'s own purple and pink. Two taps become one, and it reads as Toggl without shipping their logo.',
+  run:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#2c1338'}),
+    rect({x:26,y:56,w:380,h:132,r:22,c:'#e57cd8'}),
+    text({x:44,y:70,w:344,h:24,size:17,c:'#7a3272',t:'RUNNING',align:'left',weight:800,track:4}),
+    text({x:44,y:96,w:344,h:56,size:46,c:'#2c1338',t:D.time,align:'left',weight:700}),
+    text({x:44,y:152,w:344,h:26,size:18,c:'#63265c',t:D.desc+' · '+D.proj,align:'left'}),
+    rect({x:26,y:200,w:380,h:72,r:18,c:'#3d1c4c'}),
+    text({x:44,y:214,w:344,h:24,size:20,c:'#f2e6f6',t:D.next,align:'left',weight:600}),
+    text({x:44,y:238,w:344,h:22,size:16,c:'#a98cb5',t:D.nextProj,align:'left'}),
+    rect({x:26,y:280,w:380,h:72,r:18,c:'#3d1c4c'}),
+    text({x:44,y:294,w:344,h:24,size:20,c:'#f2e6f6',t:'Site visit',align:'left',weight:600}),
+    text({x:44,y:318,w:344,h:22,size:16,c:'#a98cb5',t:'Home Maintenance',align:'left'}),
+    btn({x:26,y:380,w:380,h:92,r:26,c:'#1c0c24',tc:'#e57cd8',t:'STOP TIMER'})
+  ],
+  ready:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#2c1338'}),
+    text({x:26,y:30,w:380,h:26,size:18,c:'#a98cb5',t:'PICK A JOB',track:3}),
+    rect({x:26,y:68,w:380,h:78,r:20,c:'#4a2559'}),
+    rect({x:26,y:68,w:6,h:78,r:3,c:'#e57cd8'}),
+    text({x:48,y:82,w:340,h:26,size:22,c:'#fff',t:D.desc,align:'left',weight:700}),
+    text({x:48,y:110,w:340,h:22,size:16,c:'#c3a8cd',t:D.proj,align:'left'}),
+    rect({x:26,y:156,w:380,h:78,r:20,c:'#3d1c4c'}),
+    text({x:48,y:170,w:340,h:26,size:22,c:'#f2e6f6',t:D.next,align:'left',weight:600}),
+    text({x:48,y:198,w:340,h:22,size:16,c:'#a98cb5',t:D.nextProj,align:'left'}),
+    rect({x:26,y:244,w:380,h:78,r:20,c:'#3d1c4c'}),
+    text({x:48,y:258,w:340,h:26,size:22,c:'#f2e6f6',t:'Site visit',align:'left',weight:600}),
+    text({x:48,y:286,w:340,h:22,size:16,c:'#a98cb5',t:'Home Maintenance',align:'left'}),
+    btn({x:26,y:380,w:380,h:92,r:26,c:'#e57cd8',tc:'#2c1338',t:'START TOP JOB'})
+  ]
+},
+{
+  n:'Thumb', native:true,
+  note:'The bottom two thirds is one enormous target. Built for tapping with a glove on, or without looking down properly.',
+  run:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#0d0f13'}),
+    text({x:34,y:34,w:364,h:26,size:18,c:'#ff7a4d',t:'RUNNING',weight:800,track:5}),
+    text({x:24,y:72,w:384,h:78,size:62,c:'#fff',t:D.time,weight:700}),
+    text({x:34,y:156,w:364,h:30,size:21,c:'#8b929e',t:D.desc+' · '+D.proj}),
+    btn({x:24,y:208,w:384,h:268,r:60,c:'#ff5c3b',t:'STOP',size:56}),
+    text({x:24,y:404,w:384,h:26,size:18,c:'#7c2a14',t:'HOLD ANYWHERE BELOW',track:2})
+  ],
+  ready:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#0d0f13'}),
+    text({x:34,y:34,w:364,h:26,size:18,c:'#6b727d',t:'READY',weight:800,track:5}),
+    text({x:34,y:76,w:364,h:46,size:34,c:'#fff',t:D.desc,weight:700}),
+    text({x:34,y:124,w:364,h:28,size:19,c:'#8b929e',t:D.proj}),
+    btn({x:24,y:166,w:120,h:44,r:14,c:'#1b1f26',size:17,t:'‹ PREV'}),
+    btn({x:288,y:166,w:120,h:44,r:14,c:'#1b1f26',size:17,t:'NEXT ›'}),
+    btn({x:24,y:226,w:384,h:250,r:60,c:'#ff5c3b',t:'START',size:56})
+  ]
+},
+{
+  n:'Toggl', native:false,
+  note:'Leans on Toggl\'s own identity — its pink, its power mark as a shipped PNG. Instantly recognisable as the Toggl app on your wrist. Needs the icon file, and is the one direction with a trademark caveat.',
+  run:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#2c1338'}),
+    circle({cx:216,cy:104,r:44,c:'#e57cd8'}),
+    rect({x:210,y:78,w:12,h:34,r:6,c:'#2c1338'}),
+    arc({cx:216,cy:104,r:22,width:9,from:35,to:325,c:'#2c1338'}),
+    text({x:24,y:176,w:384,h:90,size:72,c:'#fff',t:D.time,weight:700}),
+    text({x:34,y:274,w:364,h:36,size:27,c:'#e57cd8',t:D.desc,weight:600}),
+    text({x:34,y:312,w:364,h:28,size:19,c:'#b39ec0',t:D.proj}),
+    btn({x:34,y:366,w:364,h:96,r:48,c:'#e57cd8',tc:'#2c1338',t:'STOP TIMER'})
+  ],
+  ready:()=>[
+    rect({x:0,y:0,w:W,h:H,c:'#2c1338'}),
+    circle({cx:216,cy:104,r:44,c:'#4a2559'}),
+    rect({x:210,y:78,w:12,h:34,r:6,c:'#2c1338'}),
+    arc({cx:216,cy:104,r:22,width:9,from:35,to:325,c:'#2c1338'}),
+    text({x:34,y:186,w:364,h:52,size:36,c:'#fff',t:D.desc,weight:700}),
+    text({x:34,y:242,w:364,h:30,size:20,c:'#b39ec0',t:D.proj}),
+    btn({x:34,y:292,w:76,h:56,r:28,c:'#4a2559',size:26,t:'‹'}),
+    text({x:110,y:292,w:212,h:56,size:19,c:'#b39ec0',t:'1 / 5'}),
+    btn({x:322,y:292,w:76,h:56,r:28,c:'#4a2559',size:26,t:'›'}),
+    btn({x:34,y:366,w:364,h:96,r:48,c:'#e57cd8',tc:'#2c1338',t:'START TIMER'})
+  ]
+}
+];
+
+let state = 'run';
+const grid = document.getElementById('grid');
+
+function counts(prims){
+  const c = {rect:0,text:0,arc:0};
+  prims.forEach(p=>{
+    if(p.startsWith('<rect')) c.rect++;
+    else if(p.startsWith('<text')) c.text++;
+    else if(p.startsWith('<path')||p.startsWith('<circle')) c.arc++;
+    else { c.rect++; c.text++; }
+  });
+  return c;
+}
+
+function draw(){
+  grid.innerHTML = DESIGNS.map((d,i)=>{
+    const prims = state==='run' ? d.run() : d.ready();
+    const c = counts(prims);
+    const flag = d.native
+      ? '<span class="flag flag--ok">native</span>'
+      : '<span class="flag flag--asset">asset</span>';
+    return `<article class="card">
+      <div class="card__head">
+        <span class="num">${String(i+1).padStart(2,'0')}</span>
+        <span class="name">${d.n}</span>
+      </div>
+      <p class="card__note">${d.note}</p>
+      <div class="device">
+        <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${d.n} face, ${state==='run'?'running':'ready'} state">
+          ${prims.join('\n')}
+        </svg>
+      </div>
+      <div class="spec">${flag}
+        <span><b>${c.rect}</b> rect</span>
+        <span><b>${c.text}</b> text</span>
+        ${c.arc?`<span><b>${c.arc}</b> arc</span>`:''}
+      </div>
+    </article>`;
+  }).join('');
+}
+
+const bRun = document.getElementById('btn-running');
+const bReady = document.getElementById('btn-ready');
+function setState(s){
+  state = s;
+  bRun.setAttribute('aria-pressed', String(s==='run'));
+  bReady.setAttribute('aria-pressed', String(s==='ready'));
+  draw();
+}
+bRun.addEventListener('click',()=>setState('run'));
+bReady.addEventListener('click',()=>setState('ready'));
+
+// ?state=ready deep-links the idle comparison.
+setState(new URLSearchParams(location.search).get('state')==='ready' ? 'ready' : 'run');
+</script>
+</body>
+</html>

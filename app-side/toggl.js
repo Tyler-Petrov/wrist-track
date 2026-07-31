@@ -55,6 +55,58 @@ export function asArray(value) {
   return value && Array.isArray(value.items) ? value.items : []
 }
 
+export const HISTORY_DAYS = 30
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const isoDate = (ms) => new Date(ms).toISOString().slice(0, 10)
+
+/**
+ * Toggl documents /me/time_entries only as "lists latest time entries" and
+ * never says how far back that reaches, so ask for an explicit window instead
+ * of trusting the default. end_date is exclusive, hence tomorrow.
+ */
+export function recentEntriesPath(now = Date.now(), days = HISTORY_DAYS) {
+  // meta=true makes Toggl inline project_name, so preset labels do not depend
+  // on the cached project list being complete.
+  return (
+    `/me/time_entries?meta=true` +
+    `&start_date=${isoDate(now - days * DAY_MS)}&end_date=${isoDate(now + DAY_MS)}`
+  )
+}
+
+const NO_PROJECT = 'No project'
+const NO_DESCRIPTION = 'No description'
+
+/**
+ * Toggl entries very often have no description — the project alone is the
+ * label. Keep the real description for the API and show something readable.
+ */
+export function presetLabel(description, projectName) {
+  if (description) return description
+  if (projectName && projectName !== NO_PROJECT) return projectName
+  return NO_DESCRIPTION
+}
+
+/**
+ * Second line of the card. When the label already fell back to the project,
+ * repeating it would read as "Home Maintenance / Home Maintenance", so say
+ * what is actually missing instead.
+ */
+export function presetSubtitle(description, projectName) {
+  if (description) return projectName || NO_PROJECT
+  if (projectName && projectName !== NO_PROJECT) return NO_DESCRIPTION
+  return NO_PROJECT
+}
+
+export function makeUpdatePayload({ description, projectId, workspaceId }) {
+  return {
+    description: String(description || '').trim(),
+    // null clears the project, which is what "No project" should mean.
+    project_id: projectId ? Number(projectId) : null,
+    workspace_id: Number(workspaceId)
+  }
+}
+
 export function makeStartPayload({ description, projectId, workspaceId, now }) {
   const payload = {
     created_with: 'WristTrack for Zepp OS',
@@ -87,54 +139,90 @@ export function reduceAccount(me) {
   }
 }
 
+export const PRESET_LIMIT = 5
+
+/**
+ * The watch offers the five most recent distinct entries, newest first. Toggl
+ * returns /me/time_entries newest first already. The configured default is
+ * only used as a fallback when the account has no history to draw on, so a
+ * fresh account still has something to start.
+ */
 export function buildPresets(entries, account, settings) {
   const workspaceId = Number(settings.workspaceId || account.defaultWorkspaceId)
   const projectsById = Object.fromEntries(account.projects.map((project) => [project.id, project]))
-  const defaultProject = projectsById[Number(settings.projectId)]
-  const candidates = [
-    {
-      description: String(settings.description || 'Working').trim() || 'Working',
-      projectId: defaultProject ? defaultProject.id : null,
-      projectName: defaultProject ? defaultProject.name : 'No project',
-      workspaceId
-    },
-    ...asArray(entries).map((entry) => ({
-      description: String(entry.description || 'Working').trim() || 'Working',
-      projectId: entry.project_id || entry.pid || null,
-      projectName:
-        entry.project_name ||
-        (projectsById[entry.project_id || entry.pid] && projectsById[entry.project_id || entry.pid].name) ||
-        'No project',
-      workspaceId: entry.workspace_id || entry.wid || workspaceId
-    }))
-  ]
+
+  const recent = asArray(entries)
+    // Skip deleted entries, and the running one: it is already on screen and
+    // offering it as something to switch to is meaningless.
+    .filter((entry) => !entry.server_deleted_at && !(Number(entry.duration) < 0))
+    .map((entry) => {
+      const projectId = entry.project_id || entry.pid || null
+      const projectName =
+        entry.project_name || (projectsById[projectId] && projectsById[projectId].name) || NO_PROJECT
+      const description = String(entry.description || '').trim()
+      return {
+        description,
+        label: presetLabel(description, projectName),
+        subtitle: presetSubtitle(description, projectName),
+        projectId,
+        projectName,
+        workspaceId: entry.workspace_id || entry.wid || workspaceId
+      }
+    })
 
   const seen = {}
-  return candidates.filter((candidate) => {
-    const key = `${candidate.workspaceId}:${candidate.projectId || 0}:${candidate.description}`
-    if (seen[key]) return false
-    seen[key] = true
-    return true
-  }).slice(0, 6)
+  const presets = recent
+    .filter((candidate) => {
+      const key = `${candidate.workspaceId}:${candidate.projectId || 0}:${candidate.description}`
+      if (seen[key]) return false
+      seen[key] = true
+      return true
+    })
+    .slice(0, PRESET_LIMIT)
+
+  if (presets.length > 0) return presets
+
+  const defaultProject = projectsById[Number(settings.projectId)]
+  const description = String(settings.description || 'Working').trim() || 'Working'
+  const projectName = defaultProject ? defaultProject.name : NO_PROJECT
+  return [
+    {
+      description,
+      label: presetLabel(description, projectName),
+      subtitle: presetSubtitle(description, projectName),
+      projectId: defaultProject ? defaultProject.id : null,
+      projectName,
+      workspaceId
+    }
+  ]
 }
 
 export function publicEntry(entry, account) {
   if (!entry || !entry.id) return null
   const projectId = entry.project_id || entry.pid || null
   const project = account.projects.find((item) => item.id === projectId)
+  const projectName = entry.project_name || (project && project.name) || NO_PROJECT
+  const description = String(entry.description || '').trim()
   return {
     id: entry.id,
     workspaceId: entry.workspace_id || entry.wid,
-    description: entry.description || 'Working',
-    projectName: entry.project_name || (project && project.name) || 'No project',
+    description,
+    label: presetLabel(description, projectName),
+    subtitle: presetSubtitle(description, projectName),
+    projectName,
     start: entry.start
   }
 }
 
 export function friendlyError(error) {
   const message = String((error && error.message) || error || '')
-  if (/403|unauthorized|forbidden/i.test(message)) return 'Token rejected. Update it in Zepp settings.'
-  if (/network|fetch|offline|timeout/i.test(message)) return 'Phone is offline or Toggl is unavailable.'
+  if (/\b(401|403)\b|unauthorized|forbidden/i.test(message)) return 'Token rejected. Update it in Zepp settings.'
+  // Toggl answers 402 once the plan's hourly API quota is spent (30/hour on
+  // Free), and 429 for the short-term burst limiter.
+  if (/\b402\b|quota/i.test(message)) return 'Toggl hourly API limit reached. Try again later.'
+  if (/\b429\b|too many/i.test(message)) return 'Toggl is rate limiting. Try again shortly.'
+  if (/\b5\d\d\b/.test(message)) return 'Toggl is having trouble. Try again shortly.'
+  if (/network|fetch|offline|timeout|timed out/i.test(message)) return 'Phone is offline or Toggl is unavailable.'
   if (/already running/i.test(message)) return 'A timer is already running.'
   return message || 'Toggl request failed.'
 }

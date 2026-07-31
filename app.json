@@ -6,7 +6,7 @@
       "code": 1,
       "name": "1.0.0"
     },
-    "appId": 1000001,
+    "appId": 1000011,
     "appName": "WristTrack",
     "_pikeCompatibled": 1,
     "icon": "icon.png",
@@ -15,16 +15,18 @@
   },
   "runtime": {
     "apiVersion": {
-      "compatible": "4.4",
-      "target": "4.4",
-      "minVersion": "4.4"
+      "compatible": "3.0",
+      "target": "4.0",
+      "minVersion": "3.0"
     }
   },
   "targets": {
     "bip-max": {
       "module": {
         "page": {
-          "pages": ["page/home/index.page"]
+          "pages": [
+            "page/home/index.page"
+          ]
         },
         "app-side": {
           "path": "app-side/index"
@@ -43,7 +45,9 @@
       "designWidth": 432
     }
   },
-  "permissions": [],
+  "permissions": [
+    "data:os.device.info"
+  ],
   "i18n": {
     "en-US": {
       "name": "WristTrack"
