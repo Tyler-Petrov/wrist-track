@@ -221,6 +221,7 @@ Your phone must be paired and online at the moment you press start or stop.
 | **Toggl hourly API limit reached.** | Toggl returned 402. The free plan allows 30 requests per hour per user on a sliding window, plus a separate 30/hour per workspace. Normal use is nowhere near this. |
 | **Sync paused · last known** | Not an error. The hour's background allowance is spent, so the phone is showing the last state it confirmed. Start and stop still work. See [Staying in sync](#staying-in-sync). |
 | **Checking** | Not an error. The watch has drawn its saved screen and is waiting on the phone, normally for about a second. It clears itself. |
+| **Syncing**, with a line under it | The watch had nothing saved to draw, and the line says why: `nothing saved yet` after an install, `held back, saved 190m ago` for a running timer past its hour, or `watch storage failed …` if `@zos/storage` is not working. Only the last is a fault. |
 | **Toggl is rate limiting. Try again shortly.** | Toggl returned 429, its short-term burst limiter. Wait a moment. |
 | **Toggl is having trouble. Try again shortly.** | A 5xx from Toggl. Not your fault. |
 | **Phone is offline or Toggl is unavailable.** | The phone lost its data connection, or Bluetooth to the watch dropped. |

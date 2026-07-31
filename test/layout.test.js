@@ -63,7 +63,9 @@ test('every screen offers a way forward', async () => {
   for (const scenario of SCENARIOS) {
     const widgets = await renderScenario(makePage, scenario)
     const buttons = widgets.filter((w) => w.type === 'BUTTON')
-    if (scenario.name === '01-syncing') continue // transient, resolves on its own
+    // The pre-reply screens need no button: they resolve when the phone
+    // answers, which it does or fails loudly.
+    if (scenario.transient) continue
     assert.ok(buttons.length > 0, `${scenario.title} has no buttons`)
   }
 })

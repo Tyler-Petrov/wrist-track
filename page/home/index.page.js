@@ -114,7 +114,8 @@ Page(
       signature: '',
       stale: false,
       checking: false,
-      pollUntil: 0
+      pollUntil: 0,
+      restoreNote: ''
     },
     onInit() {
       this.adoptLiveTransport()
@@ -325,8 +326,11 @@ Page(
 
     renderSyncing() {
       this.panel(180, 132, COLORS.surface, 26)
-      this.text('Syncing', 210, 34, 26, COLORS.text)
-      this.text('Talking to your phone', 250, 30, 20, COLORS.muted)
+      this.text('Syncing', 206, 34, 26, COLORS.text)
+      this.text('Talking to your phone', 244, 30, 20, COLORS.muted)
+      // Why there was nothing to draw. The developer bridge shows the same
+      // line, but this screen is reachable without one.
+      if (this.state.restoreNote) this.text(this.state.restoreNote, 278, 24, 15, COLORS.dim)
     },
 
     renderMessage(title, body, action) {
@@ -603,19 +607,32 @@ Page(
 
     // ---- the watch's own copy of the last screen -----------------------------
 
-    /** Draws from storage on launch, so opening the app never shows a spinner. */
+    /**
+     * Draws from storage on launch, so opening the app never shows a spinner.
+     *
+     * Every path records why. A spinner has three very different causes —
+     * nothing saved yet, a running timer held back as too old, or watch
+     * storage not working at all — and the last of those would otherwise fail
+     * silently on every launch, looking exactly like the first. The reason
+     * goes to the log and onto the spinner itself, because the log is only
+     * reachable with the developer bridge attached.
+     */
     restoreStatus() {
+      this.state.restoreNote = ''
       try {
         const saved = localStorage.getItem(STATUS_KEY, '')
-        if (!saved) return
+        if (!saved) return this.noteRestore('nothing saved yet')
+
         const { savedAt, status } = JSON.parse(saved) || {}
-        if (!status) return
+        if (!status) return this.noteRestore('saved entry held no screen')
 
         // A missing, negative or absurd age means the watch clock moved under
         // us; treat it as old rather than trusting it.
         const age = Date.now() - Number(savedAt)
         const trustworthy = Number.isFinite(age) && age >= 0 && age < RESTORE_RUNNING_MAX_AGE
-        if (status.running && !trustworthy) return
+        if (status.running && !trustworthy) {
+          return this.noteRestore(`held back, saved ${Math.round(age / 60000)}m ago`)
+        }
 
         this.state.status = status
         this.state.signature = status.signature || ''
@@ -623,17 +640,25 @@ Page(
         // phone answers, and the screen says so.
         this.state.checking = true
         this.state.stale = false
-      } catch (_) {
-        // A corrupt or absent entry just means the spinner, as before.
+        console.log(`restore: drew saved screen, ${Math.round(age / 1000)}s old`)
+      } catch (error) {
+        this.noteRestore(`watch storage failed — ${(error && error.message) || 'unknown'}`)
       }
+    },
+    /** Records why the spinner is showing, for the log and for the screen. */
+    noteRestore(reason) {
+      this.state.restoreNote = reason
+      console.log(`restore: ${reason}`)
     },
     saveStatus(status) {
       try {
         if (status && status.configured) {
           localStorage.setItem(STATUS_KEY, JSON.stringify({ savedAt: Date.now(), status }))
         }
-      } catch (_) {
-        // Storage is a nicety; failing to write it must not break the screen.
+      } catch (error) {
+        // Storage is a nicety; failing to write it must not break the screen,
+        // but it does explain a spinner on every launch.
+        console.log(`save: FAILED, next launch will show the spinner — ${error && error.message}`)
       }
     },
 

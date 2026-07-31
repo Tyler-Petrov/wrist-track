@@ -133,6 +133,40 @@ test('a running timer saved under a shifted clock is not trusted', async () => {
   assert.equal(missing.state.status, null, 'no timestamp means no claim to freshness')
 })
 
+/**
+ * A spinner has three causes that look identical on screen, and the worst of
+ * them — watch storage not working — would otherwise recur silently on every
+ * launch while looking like an ordinary first run. Each one has to name itself
+ * somewhere reachable without the developer bridge attached.
+ */
+test('the spinner says why it had nothing to draw', async () => {
+  resetStorage()
+  const first = await makePage({ status: null })
+  first.restoreStatus()
+  assert.match(first.state.restoreNote, /nothing saved/i)
+  assert.ok(texts(await drawn(first)).includes(first.state.restoreNote), 'the reason should be on screen')
+
+  store(SAVED_RUNNING, 3 * 24 * HOUR)
+  const withheld = await makePage({ status: null })
+  withheld.restoreStatus()
+  assert.match(withheld.state.restoreNote, /held back/i)
+  assert.match(withheld.state.restoreNote, /4320m/, 'it should say how old, so the limit can be judged')
+
+  resetStorage({ [STATUS_KEY]: '{not json' })
+  const broken = await makePage({ status: null })
+  broken.restoreStatus()
+  assert.match(broken.state.restoreNote, /storage failed/i)
+})
+
+test('a screen that restores cleanly leaves no reason behind', async () => {
+  store(SAVED)
+  const page = await makePage({ status: null })
+  page.restoreStatus()
+
+  assert.equal(page.state.restoreNote, '', 'nothing went wrong, so nothing to explain')
+  assert.ok(!texts(await drawn(page)).includes('Syncing'))
+})
+
 test('the screen says whether it has been confirmed, and how stale it may be', async () => {
   const page = await makePage({ status: SAVED })
 
