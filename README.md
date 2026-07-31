@@ -58,7 +58,7 @@ revoke it from Toggl at any time.
 
 ```sh
 npm install --global @zeppos/zeus-cli
-npm install
+./scripts/worktree-init.sh
 zeus login          # once, with your Zepp developer account
 ```
 
@@ -101,6 +101,11 @@ bridge$ install
 project root. `install` compiles from source itself — there is no separate build
 step. Bridge mode is not persistent; if `connect` reports *No connectable online
 App or Simulator*, re-enable Bridge on the phone and keep that screen open.
+
+Re-run `./scripts/worktree-init.sh` in any directory that has never been built
+from — a fresh clone or a new git worktree, where `node_modules` is gitignored.
+Skipping it builds a package that installs happily and then shows nothing but a
+black screen; see *A black screen after install* below.
 
 ## 3. Connect your Toggl account
 
@@ -160,6 +165,21 @@ The package reached the phone but not the watch. In order:
    compact integer with a zero-padded minor: `404` means **4.4**, not 4.0.4.
    `runtime.apiVersion.minVersion` must be at or below that number.
 5. **Free space** on the watch by removing other side-loaded apps.
+
+## A black screen after install
+
+The app installs, opens, and paints nothing at all — not even the background.
+The build is missing `@zeppos/zml`. zeus does not treat an unresolvable
+dependency as an error: it emits a runtime `__$$RQR$$__("@zeppos/zml/base-side")`
+in place of the inlined library, so `BasePage` and `BaseSideService` are
+undefined on the watch and both sides die before drawing. The usual cause is
+building from a directory with no `node_modules` — a fresh clone, or a git
+worktree, where it is gitignored.
+
+Run `./scripts/worktree-init.sh` and install again. To confirm the diagnosis
+from a package, unzip `dist/*.zab`, then its `.zpk`, then `app-side.zip`:
+`app-side.js` should be around 30 KB with the library inlined. Eight KB with an
+`__$$RQR$$__` require left in it is the broken build.
 
 ## Reading the logs
 

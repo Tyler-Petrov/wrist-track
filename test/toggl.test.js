@@ -7,11 +7,13 @@ import {
   createTogglClient,
   credentialTag,
   encodeBase64,
+  entrySummary,
   friendlyError,
   makeStartPayload,
   parseBody,
   presetLabel,
   presetSubtitle,
+  projectNamesFrom,
   publicEntry,
   recentEntriesPath,
   reduceAccount
@@ -112,10 +114,40 @@ test('only sends public timer fields to the watch', () => {
       description: 'Build',
       label: 'Build',
       subtitle: 'App',
+      summary: 'Build · App',
       projectName: 'App',
       start: '2026-07-28T12:00:00Z'
     }
   )
+})
+
+test('names the running entry from the recent list when the account cache is behind', () => {
+  // /me/time_entries/current never inlines project_name, and a project created
+  // since the last account sync is missing from the cached list.
+  const stale = { projects: [] }
+  const recent = [
+    { id: 2, project_id: 77, project_name: 'Jairus', description: '' },
+    { id: 3, pid: 88, project_name: 'Apologetics', description: 'Fine tuning' }
+  ]
+  const names = projectNamesFrom(recent)
+  assert.deepEqual(names, { 77: 'Jairus', 88: 'Apologetics' })
+
+  const running = publicEntry({ id: 1, workspace_id: 10, project_id: 77, description: '' }, stale, names)
+  assert.equal(running.projectName, 'Jairus')
+  assert.equal(running.summary, 'Jairus')
+
+  // Nothing to name it with still degrades to the readable fallback.
+  const orphan = publicEntry({ id: 1, workspace_id: 10, project_id: 99, description: '' }, stale, names)
+  assert.equal(orphan.projectName, 'No project')
+  assert.equal(orphan.summary, 'No description')
+})
+
+test('summarises a running entry without repeating itself', () => {
+  assert.equal(entrySummary('Fine tuning', 'Apologetics'), 'Fine tuning · Apologetics')
+  // Project-only entries are labelled by their project; pairing would double it.
+  assert.equal(entrySummary('', 'Jairus'), 'Jairus')
+  assert.equal(entrySummary('Fine tuning', 'No project'), 'Fine tuning')
+  assert.equal(entrySummary('', 'No project'), 'No description')
 })
 
 test('maps Toggl failures to messages a watch screen can show', () => {

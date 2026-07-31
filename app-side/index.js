@@ -7,6 +7,7 @@ import {
   friendlyError,
   makeStartPayload,
   makeUpdatePayload,
+  projectNamesFrom,
   publicEntry,
   recentEntriesPath,
   reduceAccount
@@ -123,7 +124,9 @@ async function getStatus() {
   return {
     configured: true,
     userName: account.fullname,
-    running: publicEntry(current, account),
+    // The running entry comes back without an inlined project name, so name it
+    // from the recent list, which carries it.
+    running: publicEntry(current, account, projectNamesFrom(recent)),
     presets: buildPresets(asArray(recent), account, getPreferences())
   }
 }
@@ -181,7 +184,7 @@ async function startTimer(params) {
     return {
       configured: true,
       userName: account.fullname,
-      running: publicEntry(created, account),
+      running: publicEntry(created, account, projectNamesFrom(recent)),
       presets: buildPresets(asArray(recent), account, preferences)
     }
   })

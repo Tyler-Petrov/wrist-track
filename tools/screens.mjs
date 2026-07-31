@@ -102,6 +102,7 @@ export const SCENARIOS = [
           description: 'Deep work',
           label: 'Deep work',
           subtitle: 'WristTrack',
+          summary: 'Deep work · WristTrack',
           projectName: 'WristTrack',
           start: RUNNING_START
         },
@@ -128,6 +129,7 @@ export const SCENARIOS = [
           description: 'Deep work',
           label: 'Deep work',
           subtitle: 'WristTrack',
+          summary: 'Deep work · WristTrack',
           projectName: 'WristTrack',
           start: RUNNING_START
         },
@@ -154,6 +156,7 @@ export const SCENARIOS = [
           description: 'Deep work',
           label: 'Deep work',
           subtitle: 'WristTrack',
+          summary: 'Deep work · WristTrack',
           projectName: 'WristTrack',
           start: RUNNING_START
         },
