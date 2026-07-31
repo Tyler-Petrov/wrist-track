@@ -98,6 +98,34 @@ export function presetSubtitle(description, projectName) {
   return NO_PROJECT
 }
 
+/**
+ * The one line under the running clock. "Job · Project" when both exist, and
+ * whichever one does otherwise — pairing them unconditionally reads as
+ * "Jairus · Jairus" for the project-only entries Toggl is full of.
+ */
+export function entrySummary(description, projectName) {
+  if (description && projectName && projectName !== NO_PROJECT) {
+    return `${description} · ${projectName}`
+  }
+  return presetLabel(description, projectName)
+}
+
+/**
+ * Toggl only inlines project_name where we ask for meta=true, and
+ * /me/time_entries/current is not one of those calls, so the running entry
+ * would otherwise depend on the cached project list — which is up to six hours
+ * old and drops archived projects. The recent list carries the names, and the
+ * running entry is in it, so index it and prefer that.
+ */
+export function projectNamesFrom(entries) {
+  const names = {}
+  asArray(entries).forEach((entry) => {
+    const projectId = entry.project_id || entry.pid
+    if (projectId && entry.project_name) names[projectId] = entry.project_name
+  })
+  return names
+}
+
 export function makeUpdatePayload({ description, projectId, workspaceId }) {
   return {
     description: String(description || '').trim(),
@@ -197,11 +225,15 @@ export function buildPresets(entries, account, settings) {
   ]
 }
 
-export function publicEntry(entry, account) {
+export function publicEntry(entry, account, projectNames) {
   if (!entry || !entry.id) return null
   const projectId = entry.project_id || entry.pid || null
-  const project = account.projects.find((item) => item.id === projectId)
-  const projectName = entry.project_name || (project && project.name) || NO_PROJECT
+  const project = asArray(account.projects).find((item) => item.id === projectId)
+  const projectName =
+    entry.project_name ||
+    (projectId && projectNames && projectNames[projectId]) ||
+    (project && project.name) ||
+    NO_PROJECT
   const description = String(entry.description || '').trim()
   return {
     id: entry.id,
@@ -209,6 +241,7 @@ export function publicEntry(entry, account) {
     description,
     label: presetLabel(description, projectName),
     subtitle: presetSubtitle(description, projectName),
+    summary: entrySummary(description, projectName),
     projectName,
     start: entry.start
   }
