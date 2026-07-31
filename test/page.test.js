@@ -171,11 +171,43 @@ test('the spinner says why it had nothing to draw', async () => {
   const broken = await makePage({ status: null })
   broken.restoreStatus()
   assert.match(broken.state.restoreNote, /storage failed/i)
+
+  // Valid JSON that simply holds no screen is its own branch.
+  resetStorage({ [STATUS_KEY]: JSON.stringify({ savedAt: Date.now() }) })
+  const empty = await makePage({ status: null })
+  empty.restoreStatus()
+  assert.equal(empty.state.status, null)
+  assert.match(empty.state.restoreNote, /held no screen/i)
+})
+
+/**
+ * The failure that actually shipped: @zos/storage throwing outright, which
+ * the JSON fixtures above never reach because they get as far as parsing.
+ */
+test('storage refusing to answer is reported, and reaches the screen', async () => {
+  const original = localStorage.getItem
+  localStorage.getItem = () => {
+    throw new Error('permission denied')
+  }
+
+  try {
+    const page = await makePage({ status: null })
+    page.restoreStatus()
+
+    assert.equal(page.state.status, null, 'nothing to draw, so the spinner stands')
+    assert.match(page.state.restoreNote, /storage failed/i)
+    assert.match(page.state.restoreNote, /permission denied/i, 'the cause has to survive to the screen')
+    assert.ok(texts(await drawn(page)).includes(page.state.restoreNote))
+  } finally {
+    localStorage.getItem = original
+  }
 })
 
 test('a screen that restores cleanly leaves no reason behind', async () => {
   store(SAVED)
   const page = await makePage({ status: null })
+  // Seeded, or this passes whether or not a successful restore clears it.
+  page.state.restoreNote = 'a reason from an earlier launch'
   page.restoreStatus()
 
   assert.equal(page.state.restoreNote, '', 'nothing went wrong, so nothing to explain')
