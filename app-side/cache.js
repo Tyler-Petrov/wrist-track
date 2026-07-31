@@ -1,6 +1,6 @@
 // Extension included deliberately: unlike the rest of app-side/, this module
 // is imported directly by the tests, so Node's ESM resolver has to find it.
-import { PRESET_LIMIT } from './toggl.js'
+import { PRESET_LIMIT, entrySummary } from './toggl.js'
 
 /**
  * Toggl's Free plan allows 30 API requests per hour per user on a sliding
@@ -117,7 +117,9 @@ export function entryAsPreset(running) {
 
 /**
  * Re-labelling only changes what an entry is called, never when it started, so
- * the result can be worked out locally instead of re-read from Toggl.
+ * the result can be worked out locally instead of re-read from Toggl. The
+ * summary line is rebuilt rather than carried, or the card would keep naming
+ * the project the entry was moved away from.
  */
 export function relabelEntry(running, preset) {
   return {
@@ -125,7 +127,20 @@ export function relabelEntry(running, preset) {
     description: preset.description,
     label: preset.label || preset.description,
     subtitle: preset.subtitle,
+    summary: entrySummary(preset.description, preset.projectName),
     projectId: preset.projectId || null,
     projectName: preset.projectName
   }
+}
+
+/**
+ * A project-name index recovered from a cached job list, for a cache written
+ * before the index was stored alongside it. Presets carry both halves already.
+ */
+export function projectNamesFromPresets(presets) {
+  const names = {}
+  ;(presets || []).forEach((preset) => {
+    if (preset.projectId && preset.projectName) names[preset.projectId] = preset.projectName
+  })
+  return names
 }

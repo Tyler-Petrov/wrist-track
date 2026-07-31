@@ -160,6 +160,44 @@ test('a due poll costs one request, because the recent list is cached separately
   assert.deepEqual(calls, ['GET /me/time_entries/current'], 'a poll should only ask what is running')
 })
 
+/**
+ * /me/time_entries/current does not inline project_name — only the recent
+ * entries call asks for meta=true — so the running card's project has to come
+ * from that list. Polls skip that request, and the cached job list has the
+ * running entry filtered out of it, so the name is kept beside the cache. A
+ * regression here reads "No project" on the card while the rows below name it
+ * correctly, which is the bug #1 fixed.
+ */
+test('the running project is still named on a poll that skips the recent list', async () => {
+  // Project 99 is deliberately absent from the account's project list, the way
+  // an archived one is. The recent list is then the only thing that knows its
+  // name, which is exactly the case #1 was about.
+  const { send, side, calls } = await setup({
+    current: runningEntry({ project_id: 99, project_name: undefined }),
+    recent: [
+      { id: 1, description: 'Deep work', project_id: 99, workspace_id: 10, duration: 900, project_name: 'Archived Work' },
+      { id: 2, description: 'Client call', project_id: 21, workspace_id: 10, duration: 600, project_name: 'Home Maintenance' }
+    ]
+  })
+
+  const first = await send('GET_STATUS')
+  assert.equal(first.running.projectName, 'Archived Work', 'the recent list should have named it')
+  assert.equal(first.running.summary, 'Deep work · Archived Work')
+
+  // Poll repeatedly with the job list still fresh. Each poll drops the running
+  // job from that list, so by the second one the list no longer carries the
+  // name — only the index stored beside it does.
+  for (let poll = 0; poll < 3; poll += 1) {
+    calls.length = 0
+    ageStatus(side, STATUS_MAX_AGE + 1)
+    const polled = await send('GET_STATUS')
+
+    assert.deepEqual(calls, ['GET /me/time_entries/current'], 'the point of the cache is not re-reading the list')
+    assert.equal(polled.running.projectName, 'Archived Work', `the project name vanished on poll ${poll + 1}`)
+    assert.equal(polled.running.summary, 'Deep work · Archived Work')
+  }
+})
+
 test('a timer stopped elsewhere is noticed, and re-reads the list it belongs in', async () => {
   const { send, side, calls, state } = await setup({ current: runningEntry() })
 

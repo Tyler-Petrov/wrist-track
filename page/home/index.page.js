@@ -379,7 +379,7 @@ Page(
           this.state.timerWidget.setProperty(hmUI.prop.TEXT, formatElapsed(running.start))
         }
       }, 1000)
-      this.line(`${running.label || running.description} · ${running.projectName}`, {
+      this.line(running.summary || running.label || running.description, {
         left: EDGE + 18,
         top: tall ? 214 : 152,
         width: ROW_WIDTH - 36,

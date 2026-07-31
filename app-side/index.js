@@ -7,6 +7,7 @@ import {
   friendlyError,
   makeStartPayload,
   makeUpdatePayload,
+  projectNamesFrom,
   publicEntry,
   recentEntriesPath,
   reduceAccount
@@ -18,6 +19,7 @@ import {
   entryAsPreset,
   isFresh,
   nextPollDelay,
+  projectNamesFromPresets,
   promotePreset,
   recordSpend,
   refreshAllowance,
@@ -169,11 +171,29 @@ function withResponseTimeout(promise) {
   })
 }
 
-/** Reads the recent entries, which is the second request a refresh can cost. */
-async function fetchPresets(client, token, account) {
+/**
+ * Reads the recent entries, which is the second request a refresh can cost.
+ * It is also the only call that asks Toggl to inline project names, so the
+ * index it yields is what lets the running entry be named at all.
+ */
+async function fetchRecent(client, token, account) {
   const recent = await client.request(recentEntriesPath())
   assertCurrentToken(token)
-  return buildPresets(asArray(recent), account, getPreferences())
+  return {
+    presets: buildPresets(asArray(recent), account, getPreferences()),
+    projectNames: projectNamesFrom(recent)
+  }
+}
+
+/**
+ * The project names a poll can use without re-reading the recent entries. The
+ * index is stored with the cache precisely because the job list it was built
+ * from has the running entry removed from it, so rebuilding from that list
+ * would lose the one name the running card actually needs.
+ */
+function cachedProjectNames(cache) {
+  if (cache && cache.projectNames) return cache.projectNames
+  return projectNamesFromPresets(cache && cache.presets)
 }
 
 async function refreshStatus(token, cache) {
@@ -181,31 +201,38 @@ async function refreshStatus(token, cache) {
   const account = await getAccount(token)
   const current = await client.request('/me/time_entries/current')
   assertCurrentToken(token)
-  const running = publicEntry(current, account)
 
   // The recent list barely moves, so it is re-read on its own slow clock
   // rather than on every poll — that is what keeps a refresh to one request.
   // A timer stopping is the exception: the entry that just ended belongs at
   // the top of the list.
-  const stoppedElsewhere = Boolean(cache && cache.running) && !running
-  const stale = !cache || !(cache.presets || []).length || !isFresh(cache.presetsAt, PRESETS_MAX_AGE)
+  const stoppedElsewhere = Boolean(cache && cache.running) && !(current && current.id)
+  const expired = !cache || !(cache.presets || []).length || !isFresh(cache.presetsAt, PRESETS_MAX_AGE)
+  const reread = expired || stoppedElsewhere
 
   let presets = (cache && cache.presets) || []
   let presetsAt = (cache && cache.presetsAt) || 0
-  if (stale || stoppedElsewhere) {
-    presets = await fetchPresets(client, token, account)
+  let projectNames = cachedProjectNames(cache)
+
+  if (reread) {
+    const fresh = await fetchRecent(client, token, account)
+    presets = fresh.presets
     presetsAt = Date.now()
-  } else if (running) {
-    // Never offer the running entry as something to switch to.
-    presets = withoutPreset(presets, entryAsPreset(running))
+    projectNames = fresh.projectNames
   }
+
+  const running = publicEntry(current, account, projectNames)
+  // Never offer the running entry as something to switch to. A freshly read
+  // list already excludes it, having asked Toggl for completed entries only.
+  if (running && !reread) presets = withoutPreset(presets, entryAsPreset(running))
 
   return writeStatus({
     credentialTag: credentialTag(token),
     userName: account.fullname,
     running,
     presets,
-    presetsAt
+    presetsAt,
+    projectNames
   })
 }
 
@@ -297,21 +324,28 @@ async function startTimer(params) {
     })
     assertCurrentToken(token)
 
-    const running = publicEntry(created, account)
-    const cached = (cache && cache.presets) || []
     // The started job leaves the list — it is on the card instead. With no
     // list yet there is nothing to subtract from, so read one.
-    const presets = cached.length
-      ? withoutPreset(cached, entryAsPreset(running))
-      : await fetchPresets(client, token, account)
+    const cached = (cache && cache.presets) || []
+    const list = cached.length
+      ? { presets: cached, presetsAt: (cache && cache.presetsAt) || 0, projectNames: cachedProjectNames(cache) }
+      : { ...(await fetchRecent(client, token, account)), presetsAt: Date.now() }
+
+    // The preset that was just started names its own project, which settles it
+    // even when the created entry and the cached list both come back without.
+    const running = publicEntry(created, account, {
+      ...list.projectNames,
+      ...(params.projectId && params.projectName ? { [params.projectId]: params.projectName } : {})
+    })
 
     return present(
       writeStatus({
         credentialTag: credentialTag(token),
         userName: account.fullname,
         running,
-        presets,
-        presetsAt: cached.length ? (cache && cache.presetsAt) || 0 : Date.now()
+        presets: withoutPreset(list.presets, entryAsPreset(running)),
+        presetsAt: list.presetsAt,
+        projectNames: list.projectNames
       }),
       false
     )
