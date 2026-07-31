@@ -1,7 +1,22 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
 import { loadPage } from '../tools/screens.mjs'
 import { localStorage, resetStorage } from '../tools/stubs/storage.mjs'
+
+/**
+ * The watch-side copy lives in @zos/storage, which throws "permission denied"
+ * without this declared. Nothing crashes when it does — restoreStatus catches
+ * it and falls back to the spinner — so the whole feature simply stops working
+ * silently. It shipped that way once already.
+ */
+test('app.json declares the permission the watch-side copy needs', () => {
+  const { permissions } = JSON.parse(readFileSync(new URL('../app.json', import.meta.url), 'utf8'))
+  assert.ok(
+    (permissions || []).includes('device:os.local_storage'),
+    `@zos/storage needs device:os.local_storage; app.json declares ${JSON.stringify(permissions)}`
+  )
+})
 
 const STATUS_KEY = 'wt.status'
 
