@@ -104,6 +104,10 @@ The Side Service holds the second cache, and meters what reaches Toggl:
   the finished job is moved to the top of the list locally instead of re-reading
   it. Stopping and re-labelling cost one request each, down from two and three;
   starting costs two, down from three.
+- **The job list is cached whole.** Keeping the running job out of it is done on
+  the way to the watch, not in the cache. Written back, that removal would be
+  permanent: every job that ran would drop out of the list until the next
+  recent-entries read, and re-labelling away from one would never offer it back.
 - **Starting always asks Toggl anyway.** The one place the cache is deliberately
   not trusted. A timer begun on the phone seconds ago may not have been polled
   yet, and starting a second one over it corrupts the time log — which is worth

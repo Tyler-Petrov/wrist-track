@@ -279,6 +279,57 @@ test('starting is refused when Toggl has a timer the cache has not seen yet', as
   )
 })
 
+/**
+ * The running job is kept out of the list it could be switched to, but that
+ * removal used to be written back to the cache — so each job that ran was lost
+ * from the list permanently, and re-labelling away from one did not bring it
+ * back. Over a session between recent-list reads the list thinned out.
+ */
+test('re-labelling puts the job that was running back in the list', async () => {
+  const { send } = await setup({ current: runningEntry() })
+  const before = await send('GET_STATUS')
+  assert.deepEqual(
+    before.presets.map((preset) => preset.description),
+    ['Client call'],
+    'the running job is not offered as something to switch to'
+  )
+
+  const after = await send('UPDATE', {
+    entryId: 4242,
+    workspaceId: 10,
+    description: 'Client call',
+    projectId: 21,
+    label: 'Client call',
+    subtitle: 'Home Maintenance',
+    projectName: 'Home Maintenance'
+  })
+
+  assert.deepEqual(
+    after.presets.map((preset) => preset.description),
+    ['Deep work'],
+    'switching to Client call should offer Deep work again, and stop offering Client call'
+  )
+})
+
+test('the job list does not erode across polls', async () => {
+  const { send, side } = await setup({ current: runningEntry() })
+  await send('GET_STATUS')
+
+  for (let poll = 0; poll < 4; poll += 1) {
+    ageStatus(side, STATUS_MAX_AGE + 1)
+    const polled = await send('GET_STATUS')
+    assert.deepEqual(
+      polled.presets.map((preset) => preset.description),
+      ['Client call'],
+      `the list changed on poll ${poll + 1}`
+    )
+  }
+
+  // Stopping restores the whole list, the finished job included.
+  const stopped = await send('STOP', { entryId: 4242, workspaceId: 10 })
+  assert.deepEqual(stopped.presets.map((preset) => preset.description), ['Deep work', 'Client call'])
+})
+
 test('re-labelling costs one request and does not reset the clock', async () => {
   const { send, calls } = await setup({ current: runningEntry() })
   const before = await send('GET_STATUS')
