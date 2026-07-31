@@ -117,7 +117,7 @@ export const SCENARIOS = [
     title: 'Starting',
     description: 'START TIMER pressed, waiting on Toggl.',
     state: {
-      busy: true,
+      acting: true,
       status: {
         configured: true,
         userName: 'Tyler Petrov',
@@ -185,7 +185,7 @@ export const SCENARIOS = [
     title: 'Stopping',
     description: 'STOP TIMER pressed, waiting on Toggl.',
     state: {
-      busy: true,
+      acting: true,
       status: {
         configured: true,
         userName: 'Tyler Petrov',

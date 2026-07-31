@@ -182,6 +182,49 @@ test('a screen that restores cleanly leaves no reason behind', async () => {
   assert.ok(!texts(await drawn(page)).includes('Syncing'))
 })
 
+/**
+ * onInit fires the status read before build() paints, so the first frame of a
+ * restored screen is drawn with a request in flight. That must not read as a
+ * pending action: the screen is drawn from the cache and behaves as though it
+ * is right, so the button says what it does, not what it is waiting on.
+ */
+test('a restored screen offers to stop the timer, not "Stopping"', async () => {
+  const page = await makePage({ status: SAVED_RUNNING, checking: true, reading: true })
+  const labels = texts(await drawn(page))
+
+  assert.ok(labels.includes('Stop timer'), `expected a live Stop timer button, got ${JSON.stringify(labels)}`)
+  assert.ok(!labels.includes('Stopping'), 'a status read is not a pending stop')
+  // The quiet note is the honest signal that a reply is outstanding.
+  assert.ok(labels.includes('Checking'))
+})
+
+test('a pending stop does say Stopping', async () => {
+  const page = await makePage({ status: SAVED_RUNNING, acting: true })
+  const labels = texts(await drawn(page))
+  assert.ok(labels.includes('Stopping'), 'a real pending action still says so')
+})
+
+test('a tap may interrupt a status read, but not another action', async () => {
+  const page = await makePage({ status: SAVED_RUNNING })
+  const sent = []
+  page.request = (payload) => {
+    sent.push(payload.method)
+    return new Promise(() => {})
+  }
+
+  page.loadStatus()
+  assert.deepEqual(sent, ['GET_STATUS'])
+
+  // Tapping stop while that read is outstanding has to reach the phone, or
+  // the button was live in appearance only.
+  page.stop()
+  assert.deepEqual(sent, ['GET_STATUS', 'STOP'], 'the stop was swallowed by the in-flight read')
+
+  // A second action while the first is pending is refused, as the phone would.
+  page.stop()
+  assert.deepEqual(sent, ['GET_STATUS', 'STOP'], 'actions must not overlap')
+})
+
 test('the screen says whether it has been confirmed, and how stale it may be', async () => {
   const page = await makePage({ status: SAVED })
 

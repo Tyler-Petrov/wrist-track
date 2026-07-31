@@ -105,7 +105,8 @@ Page(
       widgets: [],
       timerWidget: null,
       interval: null,
-      busy: false,
+      reading: false,
+      acting: false,
       mode: 'view',
       error: '',
       mounted: false,
@@ -235,7 +236,7 @@ Page(
         top,
         height: 92,
         radius: 26,
-        color: this.state.busy ? COLORS.accentPressed : COLORS.accent,
+        color: this.state.acting ? COLORS.accentPressed : COLORS.accent,
         pressed: COLORS.accentPressed,
         textColor: COLORS.onAccent,
         onClick
@@ -358,7 +359,7 @@ Page(
         top: 56,
         height: cardHeight,
         radius: 22,
-        color: this.state.busy ? COLORS.accentPressed : COLORS.accent,
+        color: this.state.acting ? COLORS.accentPressed : COLORS.accent,
         pressed: COLORS.accentPressed,
         onClick: () => this.startEdit()
       })
@@ -398,7 +399,7 @@ Page(
       })
 
       this.button({
-        label: this.state.busy ? 'Stopping' : 'Stop timer',
+        label: this.state.acting ? 'Stopping' : 'Stop timer',
         top: PRIMARY_TOP,
         height: 92,
         color: COLORS.deep,
@@ -465,7 +466,7 @@ Page(
       }
 
       const selected = presets[this.state.presetIndex] || presets[0]
-      this.primaryButton(this.state.busy ? 'Starting' : 'Start timer', PRIMARY_TOP, () =>
+      this.primaryButton(this.state.acting ? 'Starting' : 'Start timer', PRIMARY_TOP, () =>
         this.start(selected)
       )
     },
@@ -511,14 +512,14 @@ Page(
     },
 
     startEdit() {
-      if (this.state.busy) return
+      if (this.state.acting) return
       this.touch()
       this.state.mode = 'edit'
       this.state.presetIndex = 0
       this.render()
     },
     cancelEdit() {
-      if (this.state.busy) return
+      if (this.state.acting) return
       this.touch()
       this.state.mode = 'view'
       this.render()
@@ -539,12 +540,12 @@ Page(
             projectName: preset.projectName
           }
         },
-        { showBusy: true, thenMode: 'view' }
+        { acting: true, thenMode: 'view' }
       )
     },
 
     selectPreset(index) {
-      if (this.state.busy || index < 0) return
+      if (this.state.acting || index < 0) return
       this.touch()
       this.state.presetIndex = index
       this.render()
@@ -558,16 +559,26 @@ Page(
 
     // ---- side-service calls -------------------------------------------------
 
-    /** Runs one phone request, ignoring replies that a newer request replaced. */
-    run(payload, { showBusy, thenMode } = {}) {
-      if (this.state.busy) return
+    /**
+     * Runs one phone request, ignoring replies that a newer request replaced.
+     *
+     * A tap may interrupt a status read: the screen is drawn from the cache
+     * and behaves as though it is right, so a button that looks live has to be
+     * live. Bumping the generation makes the read's reply be dropped. Two
+     * actions may not overlap — the phone refuses that anyway — and a second
+     * status read while one is in flight is simply redundant.
+     */
+    run(payload, { acting, thenMode } = {}) {
+      if (this.state.acting) return
+      if (!acting && this.state.reading) return
       this.touch()
       this.adoptLiveTransport()
 
       const generation = ++this.state.requestGeneration
-      this.state.busy = true
+      this.state.reading = !acting
+      this.state.acting = Boolean(acting)
       this.state.error = ''
-      if (showBusy) this.render()
+      if (acting) this.render()
 
       const isCurrent = () => this.state.mounted && generation === this.state.requestGeneration
 
@@ -600,7 +611,8 @@ Page(
         })
         .finally(() => {
           if (!isCurrent()) return
-          this.state.busy = false
+          this.state.reading = false
+          this.state.acting = false
           this.render()
         })
     },
@@ -691,7 +703,9 @@ Page(
     refresh() {
       if (!this.state.mounted) return
       // Mid-action or mid-choice, come back later rather than move things.
-      if (this.state.busy || this.state.mode === 'edit') return this.schedulePoll(POLL_FALLBACK_MS)
+      if (this.state.acting || this.state.reading || this.state.mode === 'edit') {
+        return this.schedulePoll(POLL_FALLBACK_MS)
+      }
 
       this.adoptLiveTransport()
       const generation = this.state.requestGeneration
@@ -736,14 +750,14 @@ Page(
       this.run({ method: 'GET_STATUS' }, { thenMode: 'view' })
     },
     start(preset) {
-      this.run({ method: 'START', params: preset }, { showBusy: true })
+      this.run({ method: 'START', params: preset }, { acting: true })
     },
     stop() {
       const running = this.state.status && this.state.status.running
       if (!running) return
       this.run(
         { method: 'STOP', params: { entryId: running.id, workspaceId: running.workspaceId } },
-        { showBusy: true }
+        { acting: true }
       )
     }
   })
