@@ -58,7 +58,7 @@ revoke it from Toggl at any time.
 
 ```sh
 npm install --global @zeppos/zeus-cli
-npm install
+./scripts/worktree-init.sh
 zeus login          # once, with your Zepp developer account
 ```
 
@@ -102,12 +102,10 @@ project root. `install` compiles from source itself — there is no separate bui
 step. Bridge mode is not persistent; if `connect` reports *No connectable online
 App or Simulator*, re-enable Bridge on the phone and keep that screen open.
 
-Run `./scripts/worktree-init.sh` first in any directory that has never been
-built from — a fresh clone or a new git worktree. `node_modules` is gitignored,
-and zeus does not fail on a dependency it cannot resolve: it leaves a runtime
-require for `@zeppos/zml` in the bundle and builds a package that installs
-happily and then shows nothing but a black screen. See *A black screen after
-install* below.
+Re-run `./scripts/worktree-init.sh` in any directory that has never been built
+from — a fresh clone or a new git worktree, where `node_modules` is gitignored.
+Skipping it builds a package that installs happily and then shows nothing but a
+black screen; see *A black screen after install* below.
 
 ## 3. Connect your Toggl account
 

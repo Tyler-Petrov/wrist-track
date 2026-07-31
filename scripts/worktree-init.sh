@@ -15,15 +15,24 @@
 set -euo pipefail
 
 # t3code exports the worktree it just created; outside t3code, use the checkout
-# this script lives in.
-root="${T3CODE_WORKTREE_PATH:-$(git rev-parse --show-toplevel)}"
+# this script lives in — resolved from the script's own path, so calling it from
+# anywhere still prepares the right directory.
+if [ -n "${T3CODE_WORKTREE_PATH:-}" ]; then
+  root="$T3CODE_WORKTREE_PATH"
+else
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+  root="$(git -C "$script_dir" rev-parse --show-toplevel)"
+fi
 cd "$root"
 
 echo "==> Installing dependencies in $root"
 npm install --no-audit --no-fund
 
-if [ ! -d node_modules/@zeppos/zml ]; then
-  echo "!! @zeppos/zml is missing after npm install." >&2
+# Resolve the two subpaths the app actually imports rather than trusting that the
+# package directory exists: a partial install passes a directory check and still
+# leaves both sides of the app undefined on the watch.
+if ! node -e 'require.resolve("@zeppos/zml/base-side"); require.resolve("@zeppos/zml/base-page")' 2>/dev/null; then
+  echo "!! @zeppos/zml does not resolve after npm install." >&2
   echo "   Building from here would produce a package that installs on the" >&2
   echo "   watch and then shows a black screen. Fix the install before you" >&2
   echo "   run 'zeus bridge'." >&2
