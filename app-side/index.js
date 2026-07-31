@@ -96,11 +96,22 @@ function writeStatus(cache) {
 
 /** Shapes a cache entry into the reply the watch renders from. */
 function present(cache, stale) {
+  const running = cache.running || null
+  const list = cache.presets || []
   const status = {
     configured: true,
     userName: cache.userName,
-    running: cache.running || null,
-    presets: cache.presets || [],
+    running,
+    /**
+     * Switching to the job already running is meaningless, so it is kept out
+     * of the list — but only on the way to the watch. Removing it from the
+     * cache instead made the removal permanent: every job that ran was lost
+     * from the list until the next recent-entries read, and re-labelling away
+     * from one never offered it again. Filtering here also covers the case
+     * the duration check misses, where an earlier completed run of the same
+     * job is in the list under its own id.
+     */
+    presets: running ? withoutPreset(list, entryAsPreset(running)) : list,
     fetchedAt: cache.fetchedAt,
     stale: Boolean(stale),
     nextPollMs: nextPollDelay(readSpend())
@@ -221,10 +232,9 @@ async function refreshStatus(token, cache) {
     projectNames = fresh.projectNames
   }
 
+  // The list is stored whole. Keeping the running job out of it is a
+  // presentation concern, handled in present().
   const running = publicEntry(current, account, projectNames)
-  // Never offer the running entry as something to switch to. A freshly read
-  // list already excludes it, having asked Toggl for completed entries only.
-  if (running && !reread) presets = withoutPreset(presets, entryAsPreset(running))
 
   return writeStatus({
     credentialTag: credentialTag(token),
@@ -285,8 +295,10 @@ async function updateTimer(params) {
     return present(
       writeStatus({
         ...cache,
-        running: relabelEntry(cache.running, { ...params, workspaceId }),
-        presets: withoutPreset(cache.presets, { ...params, workspaceId })
+        running: relabelEntry(cache.running, { ...params, workspaceId })
+        // The list is left alone: the job being switched away from belongs
+        // back in it, and the one switched to drops out of it, both of which
+        // follow from the new running entry when the status is presented.
       }),
       false
     )
@@ -324,8 +336,8 @@ async function startTimer(params) {
     })
     assertCurrentToken(token)
 
-    // The started job leaves the list — it is on the card instead. With no
-    // list yet there is nothing to subtract from, so read one.
+    // With no list cached yet there is nothing to show under the card, so
+    // read one. The started job is filtered out of it when presented.
     const cached = (cache && cache.presets) || []
     const list = cached.length
       ? { presets: cached, presetsAt: (cache && cache.presetsAt) || 0, projectNames: cachedProjectNames(cache) }
@@ -343,7 +355,7 @@ async function startTimer(params) {
         credentialTag: credentialTag(token),
         userName: account.fullname,
         running,
-        presets: withoutPreset(list.presets, entryAsPreset(running)),
+        presets: list.presets,
         presetsAt: list.presetsAt,
         projectNames: list.projectNames
       }),
