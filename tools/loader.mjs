@@ -4,7 +4,9 @@ const STUBS = {
   '@zos/ui': './stubs/ui.mjs',
   '@zos/device': './stubs/device.mjs',
   '@zos/timer': './stubs/timer.mjs',
-  '@zeppos/zml/base-page': './stubs/zml-page.mjs'
+  '@zos/storage': './stubs/storage.mjs',
+  '@zeppos/zml/base-page': './stubs/zml-page.mjs',
+  '@zeppos/zml/base-side': './stubs/zml-side.mjs'
 }
 
 export function resolve(specifier, context, nextResolve) {

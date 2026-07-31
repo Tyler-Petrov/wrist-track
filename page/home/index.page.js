@@ -1,7 +1,40 @@
 import * as hmUI from '@zos/ui'
-import { setInterval, clearInterval } from '@zos/timer'
+import { setInterval, clearInterval, setTimeout, clearTimeout } from '@zos/timer'
+import { localStorage } from '@zos/storage'
 import { BasePage } from '@zeppos/zml/base-page'
 import { COLORS, CONTENT_WIDTH, GUTTER, SCREEN, u, x, y } from './theme'
+
+// The watch keeps its own copy of the last screen it drew, so opening the app
+// shows the timer immediately instead of a spinner while the phone is asked.
+const STATUS_KEY = 'wt.status'
+
+/**
+ * How old that copy may be before a *running* timer in it stops being worth
+ * drawing. The elapsed clock is computed from the start time, so it is right
+ * whenever the timer really is still going — the risk is the word "Running"
+ * itself, on an entry stopped from the phone days ago.
+ *
+ * A copy showing nothing running has no such claim to be wrong about: it is a
+ * menu of recent jobs, which is exactly what somebody opening the app to start
+ * one wants, however old it is. So only the running case expires.
+ */
+const RESTORE_RUNNING_MAX_AGE = 60 * 60 * 1000
+
+// A timer stopped on the phone or the web app has to be noticed by asking,
+// because a Side Service cannot hold a socket open to Toggl. The phone side
+// serves a cache and meters what actually reaches Toggl, so these polls are
+// mostly free; it also says when it is next worth asking, via nextPollMs.
+const POLL_MIN_MS = 5 * 1000
+const POLL_MAX_MS = 5 * 60 * 1000
+const POLL_FALLBACK_MS = 30 * 1000
+
+/**
+ * Polling stops this long after the last thing the wearer did. Glances last
+ * seconds, so anything past this is an app left open in a pocket — which must
+ * not quietly spend the hour's allowance, whether or not the platform
+ * suspends page timers when the screen sleeps.
+ */
+const POLL_IDLE_STOP_MS = 2 * 60 * 1000
 
 const BUTTON_RADIUS = 26
 const ROW_RADIUS = 20
@@ -76,10 +109,20 @@ Page(
       mode: 'view',
       error: '',
       mounted: false,
-      requestGeneration: 0
+      requestGeneration: 0,
+      pollTimer: null,
+      signature: '',
+      stale: false,
+      checking: false,
+      pollUntil: 0
     },
     onInit() {
       this.adoptLiveTransport()
+      // Draw from the watch's own copy first, then ask the phone. Both paths
+      // end in the same place: the cache is written, and the screen is drawn
+      // from it.
+      this.restoreStatus()
+      this.touch()
       this.loadStatus()
     },
     build() {
@@ -94,6 +137,7 @@ Page(
       this.state.mounted = false
       this.state.requestGeneration += 1
       this.stopClock()
+      this.clearPoll()
     },
 
     /**
@@ -268,6 +312,17 @@ Page(
       return this.renderReady()
     },
 
+    /**
+     * Says how much to trust what is drawn. Restored-but-unconfirmed and
+     * budget-exhausted are both "not just checked", but they resolve very
+     * differently — one in a second, the other when the hour turns over.
+     */
+    statusNote() {
+      if (this.state.checking) return 'Checking'
+      if (this.state.stale) return 'Sync paused · last known'
+      return ''
+    },
+
     renderSyncing() {
       this.panel(180, 132, COLORS.surface, 26)
       this.text('Syncing', 210, 34, 26, COLORS.text)
@@ -288,6 +343,11 @@ Page(
       const others = (this.state.status.presets || []).slice(0, 2)
       const tall = others.length === 0
       const cardHeight = tall ? 216 : 132
+
+      // Above the card rather than on it: the clock below may have kept
+      // ticking past a stop made somewhere else.
+      const note = this.statusNote()
+      if (note) this.text(note, 24, 26, 15, COLORS.dim)
 
       this.button({
         label: '',
@@ -348,7 +408,8 @@ Page(
       const presets = this.state.status.presets || []
       const window = this.visibleWindow(presets)
 
-      this.text('Pick a job', 30, 26, 18, COLORS.muted)
+      const note = this.statusNote()
+      this.text(note ? `Pick a job · ${note.toLowerCase()}` : 'Pick a job', 30, 26, 18, COLORS.muted)
 
       if (presets.length === 0) {
         this.panel(90, 120, COLORS.surface)
@@ -447,12 +508,14 @@ Page(
 
     startEdit() {
       if (this.state.busy) return
+      this.touch()
       this.state.mode = 'edit'
       this.state.presetIndex = 0
       this.render()
     },
     cancelEdit() {
       if (this.state.busy) return
+      this.touch()
       this.state.mode = 'view'
       this.render()
     },
@@ -464,7 +527,12 @@ Page(
             entryId: running.id,
             workspaceId: preset.workspaceId || running.workspaceId,
             description: preset.description,
-            projectId: preset.projectId
+            projectId: preset.projectId,
+            // The labels travel too, so the phone can work out the result
+            // itself instead of spending a Toggl request re-reading it.
+            label: preset.label,
+            subtitle: preset.subtitle,
+            projectName: preset.projectName
           }
         },
         { showBusy: true, thenMode: 'view' }
@@ -473,10 +541,12 @@ Page(
 
     selectPreset(index) {
       if (this.state.busy || index < 0) return
+      this.touch()
       this.state.presetIndex = index
       this.render()
     },
     movePreset(direction) {
+      this.touch()
       const length = this.state.status.presets.length
       this.state.presetIndex = (this.state.presetIndex + direction + length) % length
       this.render()
@@ -487,6 +557,7 @@ Page(
     /** Runs one phone request, ignoring replies that a newer request replaced. */
     run(payload, { showBusy, thenMode } = {}) {
       if (this.state.busy) return
+      this.touch()
       this.adoptLiveTransport()
 
       const generation = ++this.state.requestGeneration
@@ -509,13 +580,19 @@ Page(
         .then(({ result }) => {
           if (!isCurrent()) return
           this.state.status = result
+          this.state.signature = result.signature || ''
+          this.state.stale = Boolean(result.stale)
+          this.state.checking = false
           this.state.presetIndex = 0
           this.state.error = ''
           if (thenMode) this.state.mode = thenMode
+          this.saveStatus(result)
+          this.schedulePoll(result.nextPollMs)
         })
         .catch((error) => {
           if (!isCurrent()) return
           this.state.error = errorText(error)
+          this.schedulePoll(POLL_FALLBACK_MS)
         })
         .finally(() => {
           if (!isCurrent()) return
@@ -523,6 +600,113 @@ Page(
           this.render()
         })
     },
+
+    // ---- the watch's own copy of the last screen -----------------------------
+
+    /** Draws from storage on launch, so opening the app never shows a spinner. */
+    restoreStatus() {
+      try {
+        const saved = localStorage.getItem(STATUS_KEY, '')
+        if (!saved) return
+        const { savedAt, status } = JSON.parse(saved) || {}
+        if (!status) return
+
+        // A missing, negative or absurd age means the watch clock moved under
+        // us; treat it as old rather than trusting it.
+        const age = Date.now() - Number(savedAt)
+        const trustworthy = Number.isFinite(age) && age >= 0 && age < RESTORE_RUNNING_MAX_AGE
+        if (status.running && !trustworthy) return
+
+        this.state.status = status
+        this.state.signature = status.signature || ''
+        // Nothing has confirmed this yet — it is last night's news until the
+        // phone answers, and the screen says so.
+        this.state.checking = true
+        this.state.stale = false
+      } catch (_) {
+        // A corrupt or absent entry just means the spinner, as before.
+      }
+    },
+    saveStatus(status) {
+      try {
+        if (status && status.configured) {
+          localStorage.setItem(STATUS_KEY, JSON.stringify({ savedAt: Date.now(), status }))
+        }
+      } catch (_) {
+        // Storage is a nicety; failing to write it must not break the screen.
+      }
+    },
+
+    /** Marks the wearer as present, which is what keeps polling alive. */
+    touch() {
+      this.state.pollUntil = Date.now() + POLL_IDLE_STOP_MS
+    },
+
+    clearPoll() {
+      if (this.state.pollTimer) clearTimeout(this.state.pollTimer)
+      this.state.pollTimer = null
+    },
+    schedulePoll(delay) {
+      this.clearPoll()
+      if (!this.state.mounted) return
+      // Left untouched for a while: stop asking until something happens.
+      if (Date.now() >= this.state.pollUntil) return
+      const requested = Number(delay) > 0 ? Number(delay) : POLL_FALLBACK_MS
+      const wait = Math.min(Math.max(requested, POLL_MIN_MS), POLL_MAX_MS)
+      this.state.pollTimer = setTimeout(() => this.refresh(), wait)
+    },
+
+    /**
+     * The background check. Unlike run() it never shows a spinner, never puts
+     * an error on screen and never disturbs the selection — a poll that found
+     * nothing new should be invisible. It only redraws when the phone reports
+     * a different signature, because rebuilding the widget tree would restart
+     * the elapsed clock.
+     */
+    refresh() {
+      if (!this.state.mounted) return
+      // Mid-action or mid-choice, come back later rather than move things.
+      if (this.state.busy || this.state.mode === 'edit') return this.schedulePoll(POLL_FALLBACK_MS)
+
+      this.adoptLiveTransport()
+      const generation = this.state.requestGeneration
+      const isCurrent = () => this.state.mounted && generation === this.state.requestGeneration
+
+      let pending
+      try {
+        pending = this.request({ method: 'GET_STATUS' })
+      } catch (error) {
+        pending = Promise.reject(error)
+      }
+
+      pending
+        .then(({ result }) => {
+          if (!isCurrent()) return
+          // A poll getting through means whatever failed before has passed,
+          // so an offline screen heals itself rather than waiting for a tap.
+          // A restored screen has never been confirmed, so the first reply
+          // always redraws even when it agrees — that is what clears the note.
+          const recovered = Boolean(this.state.error) || this.state.checking
+          const changed = recovered || (result.signature || '') !== this.state.signature
+          this.state.error = ''
+          this.state.status = result
+          this.state.signature = result.signature || ''
+          this.state.stale = Boolean(result.stale)
+          this.state.checking = false
+          this.saveStatus(result)
+          if (changed) {
+            // Something moved elsewhere — Toggl on the phone, or the web app.
+            if (this.state.presetIndex >= (result.presets || []).length) this.state.presetIndex = 0
+            this.render()
+          }
+          this.schedulePoll(result.nextPollMs)
+        })
+        .catch(() => {
+          // A failed background poll must not replace what is on screen.
+          if (isCurrent()) this.schedulePoll(POLL_FALLBACK_MS)
+        })
+    },
+
     loadStatus() {
       this.run({ method: 'GET_STATUS' }, { thenMode: 'view' })
     },

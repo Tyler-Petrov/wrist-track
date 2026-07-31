@@ -11,8 +11,25 @@ import {
   recentEntriesPath,
   reduceAccount
 } from './toggl'
+import {
+  PRESETS_MAX_AGE,
+  STATUS_MAX_AGE,
+  SLOW_POLL_MS,
+  entryAsPreset,
+  isFresh,
+  nextPollDelay,
+  promotePreset,
+  recordSpend,
+  refreshAllowance,
+  relabelEntry,
+  statusSignature,
+  withinWindow,
+  withoutPreset
+} from './cache'
 
 const ACCOUNT_KEY = 'togglAccount'
+const STATUS_KEY = 'togglStatus'
+const SPEND_KEY = 'togglSpend'
 const TOKEN_KEY = 'togglToken'
 const ACCOUNT_MAX_AGE = 6 * 60 * 60 * 1000
 const RESPONSE_TIMEOUT = 15 * 1000
@@ -42,12 +59,59 @@ function assertCurrentToken(token) {
   if (currentToken() !== token) throw new Error('Credentials changed while syncing.')
 }
 
+// ---- request budget --------------------------------------------------------
+
+function readSpend() {
+  return withinWindow(readJson(SPEND_KEY, []))
+}
+
+/**
+ * Counting inside the fetch wrapper rather than at the call sites means every
+ * request that reaches Toggl is charged, including the ones made indirectly
+ * while refreshing the account.
+ */
+function meteredFetch(request) {
+  settingsLib.setItem(SPEND_KEY, JSON.stringify(recordSpend(readSpend(), 1)))
+  return fetch(request)
+}
+
+function togglClient(token) {
+  return createTogglClient(meteredFetch, () => token)
+}
+
+// ---- status cache ----------------------------------------------------------
+
+function readStatus(token) {
+  const cache = readJson(STATUS_KEY, null)
+  return cache && cache.credentialTag === credentialTag(token) ? cache : null
+}
+
+function writeStatus(cache) {
+  const stored = { ...cache, fetchedAt: Date.now() }
+  settingsLib.setItem(STATUS_KEY, JSON.stringify(stored))
+  return stored
+}
+
+/** Shapes a cache entry into the reply the watch renders from. */
+function present(cache, stale) {
+  const status = {
+    configured: true,
+    userName: cache.userName,
+    running: cache.running || null,
+    presets: cache.presets || [],
+    fetchedAt: cache.fetchedAt,
+    stale: Boolean(stale),
+    nextPollMs: nextPollDelay(readSpend())
+  }
+  status.signature = statusSignature(status)
+  return status
+}
+
 async function syncAccount(expectedToken) {
   const token = expectedToken || currentToken()
   if (!token) throw new Error('Connect Toggl in Zepp settings.')
 
-  const syncClient = createTogglClient(fetch, () => token)
-  const me = await syncClient.request('/me?with_related_data=true')
+  const me = await togglClient(token).request('/me?with_related_data=true')
   assertCurrentToken(token)
 
   const account = {
@@ -105,39 +169,75 @@ function withResponseTimeout(promise) {
   })
 }
 
-async function getStatus() {
+/** Reads the recent entries, which is the second request a refresh can cost. */
+async function fetchPresets(client, token, account) {
+  const recent = await client.request(recentEntriesPath())
+  assertCurrentToken(token)
+  return buildPresets(asArray(recent), account, getPreferences())
+}
+
+async function refreshStatus(token, cache) {
+  const client = togglClient(token)
+  const account = await getAccount(token)
+  const current = await client.request('/me/time_entries/current')
+  assertCurrentToken(token)
+  const running = publicEntry(current, account)
+
+  // The recent list barely moves, so it is re-read on its own slow clock
+  // rather than on every poll — that is what keeps a refresh to one request.
+  // A timer stopping is the exception: the entry that just ended belongs at
+  // the top of the list.
+  const stoppedElsewhere = Boolean(cache && cache.running) && !running
+  const stale = !cache || !(cache.presets || []).length || !isFresh(cache.presetsAt, PRESETS_MAX_AGE)
+
+  let presets = (cache && cache.presets) || []
+  let presetsAt = (cache && cache.presetsAt) || 0
+  if (stale || stoppedElsewhere) {
+    presets = await fetchPresets(client, token, account)
+    presetsAt = Date.now()
+  } else if (running) {
+    // Never offer the running entry as something to switch to.
+    presets = withoutPreset(presets, entryAsPreset(running))
+  }
+
+  return writeStatus({
+    credentialTag: credentialTag(token),
+    userName: account.fullname,
+    running,
+    presets,
+    presetsAt
+  })
+}
+
+async function getStatus(options = {}) {
   const token = currentToken()
   if (!token) {
-    return { configured: false, running: null, presets: [] }
+    return { configured: false, running: null, presets: [], nextPollMs: SLOW_POLL_MS, signature: 'unconfigured' }
   }
 
-  const operationClient = createTogglClient(fetch, () => token)
-  const account = await getAccount(token)
-  const current = await operationClient.request('/me/time_entries/current')
-  assertCurrentToken(token)
-  // History is fetched even while a timer runs, because the watch offers it as
-  // the list to re-label a running entry from.
-  const recent = await operationClient.request(recentEntriesPath())
-  assertCurrentToken(token)
+  const cache = readStatus(token)
+  const now = Date.now()
 
-  return {
-    configured: true,
-    userName: account.fullname,
-    running: publicEntry(current, account),
-    presets: buildPresets(asArray(recent), account, getPreferences())
+  if (!options.force && cache) {
+    if (isFresh(cache.fetchedAt, STATUS_MAX_AGE, now)) return present(cache, false)
+    // Out of allowance: showing the last known state beats spending the
+    // request that STOP will need on a 402.
+    if (refreshAllowance(readSpend(), now) <= 0) return present(cache, true)
   }
+
+  return present(await refreshStatus(token, cache), false)
 }
 
 async function updateTimer(params) {
   return runMutation(async () => {
     const token = currentToken()
-    const operationClient = createTogglClient(fetch, () => token)
+    const client = togglClient(token)
     const entryId = Number(params.entryId)
     const workspaceId = Number(params.workspaceId)
     if (!entryId || !workspaceId) throw new Error('That timer is no longer running.')
 
     assertCurrentToken(token)
-    await operationClient.request(`/workspaces/${workspaceId}/time_entries/${entryId}`, {
+    await client.request(`/workspaces/${workspaceId}/time_entries/${entryId}`, {
       method: 'PUT',
       body: makeUpdatePayload({
         description: params.description,
@@ -146,25 +246,46 @@ async function updateTimer(params) {
       })
     })
     assertCurrentToken(token)
-    return getStatus()
+
+    // Toggl has accepted the new label, so the result is already known — the
+    // entry keeps its id and start time and only its wording changed. Take
+    // that shortcut only with the whole preset in hand; guessing at the
+    // project name would put something wrong on the card.
+    const cache = readStatus(token)
+    const known = cache && cache.running && cache.running.id === entryId
+    if (!known || params.projectName === undefined) return getStatus({ force: true })
+
+    return present(
+      writeStatus({
+        ...cache,
+        running: relabelEntry(cache.running, { ...params, workspaceId }),
+        presets: withoutPreset(cache.presets, { ...params, workspaceId })
+      }),
+      false
+    )
   })
 }
 
 async function startTimer(params) {
   return runMutation(async () => {
     const token = currentToken()
-    const operationClient = createTogglClient(fetch, () => token)
-    const current = await operationClient.request('/me/time_entries/current')
+    const client = togglClient(token)
+    const account = await getAccount(token)
+    const preferences = getPreferences()
+    const cache = readStatus(token)
+
+    // Always ask Toggl, never the cache. A timer started on the phone seconds
+    // ago may not have been polled yet, and starting a second one over it
+    // corrupts the time log — which costs more than the request this saves.
+    const current = await client.request('/me/time_entries/current')
     assertCurrentToken(token)
     if (current && current.id) throw new Error('A timer is already running.')
 
-    const account = await getAccount(token)
-    const preferences = getPreferences()
     const workspaceId = Number(params.workspaceId || preferences.workspaceId || account.defaultWorkspaceId)
     if (!workspaceId) throw new Error('Choose a workspace in Zepp settings.')
 
     assertCurrentToken(token)
-    const created = await operationClient.request(`/workspaces/${workspaceId}/time_entries`, {
+    const created = await client.request(`/workspaces/${workspaceId}/time_entries`, {
       method: 'POST',
       body: makeStartPayload({
         // A preset carrying an empty description is deliberate — many Toggl
@@ -175,50 +296,63 @@ async function startTimer(params) {
       })
     })
     assertCurrentToken(token)
-    // Carry the history across so the running screen can offer it for editing.
-    const recent = await operationClient.request(recentEntriesPath())
-    assertCurrentToken(token)
-    return {
-      configured: true,
-      userName: account.fullname,
-      running: publicEntry(created, account),
-      presets: buildPresets(asArray(recent), account, preferences)
-    }
+
+    const running = publicEntry(created, account)
+    const cached = (cache && cache.presets) || []
+    // The started job leaves the list — it is on the card instead. With no
+    // list yet there is nothing to subtract from, so read one.
+    const presets = cached.length
+      ? withoutPreset(cached, entryAsPreset(running))
+      : await fetchPresets(client, token, account)
+
+    return present(
+      writeStatus({
+        credentialTag: credentialTag(token),
+        userName: account.fullname,
+        running,
+        presets,
+        presetsAt: cached.length ? (cache && cache.presetsAt) || 0 : Date.now()
+      }),
+      false
+    )
   })
 }
 
 async function stopTimer(params) {
   return runMutation(async () => {
     const token = currentToken()
-    const operationClient = createTogglClient(fetch, () => token)
+    const client = togglClient(token)
+    const cache = readStatus(token)
     let entryId = Number(params.entryId)
     let workspaceId = Number(params.workspaceId)
 
     if (!entryId || !workspaceId) {
-      const current = await operationClient.request('/me/time_entries/current')
+      const current = await client.request('/me/time_entries/current')
       assertCurrentToken(token)
-      if (!current || !current.id) return getStatus()
+      if (!current || !current.id) return getStatus({ force: true })
       entryId = current.id
       workspaceId = current.workspace_id || current.wid
     }
 
     assertCurrentToken(token)
-    await operationClient.request(`/workspaces/${workspaceId}/time_entries/${entryId}/stop`, {
+    await client.request(`/workspaces/${workspaceId}/time_entries/${entryId}/stop`, {
       method: 'PATCH'
     })
     assertCurrentToken(token)
 
-    // Re-read the recent entries so the watch lands on a populated preset list
-    // instead of only the entry that was just stopped.
-    const account = await getAccount(token)
-    const recent = await operationClient.request(recentEntriesPath())
-    assertCurrentToken(token)
-    return {
-      configured: true,
-      userName: account.fullname,
-      running: null,
-      presets: buildPresets(asArray(recent), account, getPreferences())
-    }
+    // The entry that just ended is the most recent thing tracked, so it goes
+    // to the front of the list locally rather than costing a re-read.
+    const stopped = cache && cache.running && cache.running.id === entryId ? cache.running : null
+    if (!stopped) return getStatus({ force: true })
+
+    return present(
+      writeStatus({
+        ...cache,
+        running: null,
+        presets: promotePreset(cache.presets, entryAsPreset(stopped))
+      }),
+      false
+    )
   })
 }
 
@@ -228,7 +362,7 @@ AppSideService(
     onRequest(req, res) {
       const action =
         req.method === 'GET_STATUS'
-          ? getStatus()
+          ? getStatus(req.params || {})
           : req.method === 'START'
             ? startTimer(req.params || {})
             : req.method === 'STOP'
@@ -244,6 +378,7 @@ AppSideService(
     onSettingsChange({ key, newValue }) {
       if (key === TOKEN_KEY) {
         settingsLib.removeItem(ACCOUNT_KEY)
+        settingsLib.removeItem(STATUS_KEY)
         settingsLib.removeItem('connectionError')
         const token = String(newValue || '').trim()
         if (!token) {
@@ -259,6 +394,8 @@ AppSideService(
             this.call({ method: 'SETTINGS_CHANGED' })
           })
       } else if (['defaultDescription', 'workspaceId', 'projectId'].includes(key)) {
+        // The defaults feed the preset list, so drop it and rebuild on demand.
+        settingsLib.removeItem(STATUS_KEY)
         this.call({ method: 'SETTINGS_CHANGED' })
       }
     },

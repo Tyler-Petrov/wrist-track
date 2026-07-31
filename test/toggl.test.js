@@ -112,6 +112,9 @@ test('only sends public timer fields to the watch', () => {
       description: 'Build',
       label: 'Build',
       subtitle: 'App',
+      // projectId is already public by way of the preset list, and lets a
+      // stopped entry rejoin that list without another Toggl request.
+      projectId: 20,
       projectName: 'App',
       start: '2026-07-28T12:00:00Z'
     }

@@ -10,8 +10,37 @@ export const SCENARIOS = [
   {
     name: '01-syncing',
     title: 'Syncing',
-    description: 'Shown while the watch waits for the phone to answer.',
+    description:
+      'The very first launch only, before the watch has ever saved a screen. After that, opening the app draws the saved one instead.',
     state: { status: null, error: '' }
+  },
+  {
+    name: '01b-restored',
+    title: 'Restored on launch',
+    description:
+      'Every launch after the first: the watch draws its saved screen immediately and marks it unconfirmed until the phone answers, usually within a second.',
+    state: {
+      checking: true,
+      status: {
+        configured: true,
+        userName: 'Tyler Petrov',
+        running: {
+          id: 4242,
+          workspaceId: 10,
+          description: 'Deep work',
+          label: 'Deep work',
+          subtitle: 'WristTrack',
+          projectId: 20,
+          projectName: 'WristTrack',
+          start: RUNNING_START
+        },
+        presets: [
+          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
+          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Admin', projectName: 'Admin', projectId: 22, workspaceId: 10 }
+        ]
+      },
+      error: ''
+    }
   },
   {
     name: '02-connect-toggl',
@@ -154,6 +183,35 @@ export const SCENARIOS = [
           description: 'Deep work',
           label: 'Deep work',
           subtitle: 'WristTrack',
+          projectName: 'WristTrack',
+          start: RUNNING_START
+        },
+        presets: [
+          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
+          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Admin', projectName: 'Admin', projectId: 22, workspaceId: 10 }
+        ]
+      },
+      error: ''
+    }
+  },
+  {
+    name: '07b-running-stale',
+    title: 'Running, sync paused',
+    description:
+      "Toggl's hourly request allowance is spent, so the phone is serving its last known state. The clock keeps ticking, which is why the screen says so.",
+    state: {
+      stale: true,
+      status: {
+        configured: true,
+        stale: true,
+        userName: 'Tyler Petrov',
+        running: {
+          id: 4242,
+          workspaceId: 10,
+          description: 'Deep work',
+          label: 'Deep work',
+          subtitle: 'WristTrack',
+          projectId: 20,
           projectName: 'WristTrack',
           start: RUNNING_START
         },

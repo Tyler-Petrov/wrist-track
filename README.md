@@ -24,9 +24,15 @@ Toggl Track API v9
 Only the fields the watch needs to draw a screen cross Bluetooth — description,
 project name, start time. **Your Toggl token never leaves the phone.**
 
+The Side Service keeps the last known timer state in Zepp's settings storage
+and answers the watch from it, so the watch and Toggl are not the same
+question. See [Staying in sync](#staying-in-sync) for why that matters.
+
 ## What it does
 
 - Shows whether a timer is running, with a live elapsed clock.
+- Picks up timers started, stopped or re-labelled somewhere else — the Toggl
+  phone app, the web app, the browser extension — usually within 15 seconds.
 - Starts and stops timers against Toggl Track API v9.
 - Offers your five most recent entries as one-tap presets, newest first.
 - Re-labels a running timer in place: tap a job below the clock and the
@@ -45,6 +51,75 @@ in on the web, then reads and stores your personal API token.
 You copy that token from your Toggl profile into Zepp's settings once. It stays
 on the phone, is never sent to the watch or to any server of ours, and you can
 revoke it from Toggl at any time.
+
+## Staying in sync
+
+Stop a timer in the Toggl phone app and the watch should notice. It does, but
+by asking rather than by being told, and Toggl's Free plan allows only **30 API
+requests per hour per user** on a sliding window before it answers 402.
+
+There is no push option available here. Toggl publishes no websocket or
+streaming API for third parties, and its webhooks deliver to a public HTTPS
+endpoint, which a phone does not have. Nor could the app hold a connection open
+if one existed: a Zepp OS Side Service is given Messaging, Fetch and Settings
+and nothing else — there is no `WebSocket` anywhere in the platform SDK — and
+it does not run in the background. Every design here follows from that.
+
+There are two caches, one on each side of the Bluetooth link. **The watch keeps
+its own copy of the last screen it drew**, so opening the app draws that
+immediately and then asks the phone; when the reply lands the screen is drawn
+again from the updated copy. A launch shows the timer, not a spinner. Until the
+reply arrives the screen is marked **Checking**, because a restored screen is
+last night's news until something confirms it.
+
+That copy can be days old, so what it may claim depends on its age. A saved
+screen showing **nothing running** is drawn however old it is — it is a menu of
+recent jobs, which is what somebody opening the app to start one wants, and it
+asserts nothing that can be wrong. A saved screen showing a **running timer** is
+only drawn if it is under an hour old. The elapsed clock is computed from the
+start time, so it stays right for as long as the timer really is running; the
+risk is the word *Running* itself, on an entry stopped from the phone on Monday.
+Past that hour the spinner is the honest answer, and a watch clock that has
+moved backwards counts as no evidence of freshness at all.
+
+**Nothing runs in the background.** There is no `app-service` registered, so the
+watch has no background process, and the Side Service only wakes when it is
+asked. Polling exists only while the app is open, and stops two minutes after
+the last thing you do — an app left in a pocket must not quietly spend the hour.
+
+The Side Service holds the second cache, and meters what reaches Toggl:
+
+- **Reads are served from cache.** A status check inside a 12-second window
+  costs nothing. Opening the app twice in a minute is one request, not four.
+- **The recent-jobs list has its own slow clock.** It is re-read every 30
+  minutes rather than on every check, which is what keeps a routine poll to a
+  single request — the one asking what is running.
+- **Background checks may spend only 18 of the 30.** The remaining 12 are held
+  back so start and stop still work at the end of a long session. A screen left
+  open backs off from 15-second to 60-second checks as the hour fills, then
+  stops and says **sync paused** rather than spending a request it cannot
+  afford. `test/cache.test.js` drives an hour of that schedule and asserts the
+  reserve survives.
+- **Actions compute their own result.** Toggl has already confirmed a stop, so
+  the finished job is moved to the top of the list locally instead of re-reading
+  it. Stopping and re-labelling cost one request each, down from two and three;
+  starting costs two, down from three.
+- **Starting always asks Toggl anyway.** The one place the cache is deliberately
+  not trusted. A timer begun on the phone seconds ago may not have been polled
+  yet, and starting a second one over it corrupts the time log — which is worth
+  more than the request it would save.
+
+Measured against about thirty ten-second glances a day, which is the pattern
+this is tuned for, that comes to **63 requests across the whole day**, and a
+heavy hour of ten glances spends **12 of the 18** allowed. `test/side-service.test.js`
+drives both of those against the real code.
+
+Worth being precise about where the win is: a glance half an hour after the last
+one finds every cache expired, so it costs the same two requests it always did.
+What the cache buys is that a second look inside the same glance is free, that
+actions cost less, and that clustered glances stop paying for the recent list
+each time. The limit being reached degrades into stale-but-labelled data rather
+than an error.
 
 ---
 
@@ -135,6 +210,8 @@ Your phone must be paired and online at the moment you press start or stop.
 | **Connect Toggl** | No token saved yet. Finish step 3. |
 | **Token rejected. Update it in Zepp settings.** | Toggl returned 401 or 403 — the token was mistyped or has been revoked. Paste it again. |
 | **Toggl hourly API limit reached.** | Toggl returned 402. The free plan allows 30 requests per hour per user on a sliding window, plus a separate 30/hour per workspace. Normal use is nowhere near this. |
+| **Sync paused · last known** | Not an error. The hour's background allowance is spent, so the phone is showing the last state it confirmed. Start and stop still work. See [Staying in sync](#staying-in-sync). |
+| **Checking** | Not an error. The watch has drawn its saved screen and is waiting on the phone, normally for about a second. It clears itself. |
 | **Toggl is rate limiting. Try again shortly.** | Toggl returned 429, its short-term burst limiter. Wait a moment. |
 | **Toggl is having trouble. Try again shortly.** | A 5xx from Toggl. Not your fault. |
 | **Phone is offline or Toggl is unavailable.** | The phone lost its data connection, or Bluetooth to the watch dropped. |
@@ -181,7 +258,16 @@ npm run screens       # regenerate docs/screens/ from the real page code
 npm run build         # write a .zab into dist/
 ```
 
-`test/toggl.test.js` covers the Toggl request layer. `test/layout.test.js` runs
+`test/toggl.test.js` covers the Toggl request layer. `test/cache.test.js` covers
+the request budget and the local cache arithmetic. `test/side-service.test.js`
+runs the real `app-side` code against a stubbed Toggl and asserts what each
+action actually costs — that a repeat status read reaches Toggl zero times, a
+due poll once, stop and re-label once each, and start twice. It also replays a
+day of glances and a busy hour against the budget. `test/page.test.js` covers
+the watch-side copy — that a launch draws it rather than the spinner, that a
+three-day-old running timer is withheld while a three-day-old job list is not,
+that a corrupt one falls back safely, and that polling stops when the app is
+left alone. `test/layout.test.js` runs
 the real `page/home` code against stubbed Zepp modules and asserts every screen
 stays inside the panel, clears the rounded corners, and gives each button a
 handler — it has already caught a button clipped by the corner radius that would

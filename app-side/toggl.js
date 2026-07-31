@@ -209,6 +209,9 @@ export function publicEntry(entry, account) {
     description,
     label: presetLabel(description, projectName),
     subtitle: presetSubtitle(description, projectName),
+    // Carried so a stopped entry can be put straight back into the preset
+    // list without re-reading the recent entries from Toggl.
+    projectId,
     projectName,
     start: entry.start
   }
