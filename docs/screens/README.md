@@ -4,6 +4,7 @@ Rendered at the Amazfit Bip Max panel size (432x514) from the widget
 tree that `page/home/index.page.js` produces. Regenerate with `npm run screens`.
 
 - **Syncing** — The very first launch only, before the watch has ever saved a screen. After that, opening the app draws the saved one instead. (`01-syncing.png`)
+- **Syncing, with the reason** — When the watch had nothing to draw, the spinner says why — so a storage failure, which would otherwise look exactly like a first launch, is visible without attaching the developer bridge. (`01c-syncing-reason.png`)
 - **Restored on launch** — Every launch after the first: the watch draws its saved screen immediately and marks it unconfirmed until the phone answers, usually within a second. (`01b-restored.png`)
 - **Connect Toggl** — No API token saved in Zepp yet. (`02-connect-toggl.png`)
 - **Ready** — Connected, no timer running, several presets to page through. (`03-ready.png`)

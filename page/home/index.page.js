@@ -105,7 +105,8 @@ Page(
       widgets: [],
       timerWidget: null,
       interval: null,
-      busy: false,
+      reading: false,
+      acting: false,
       mode: 'view',
       error: '',
       mounted: false,
@@ -114,7 +115,8 @@ Page(
       signature: '',
       stale: false,
       checking: false,
-      pollUntil: 0
+      pollUntil: 0,
+      restoreNote: ''
     },
     onInit() {
       this.adoptLiveTransport()
@@ -234,7 +236,7 @@ Page(
         top,
         height: 92,
         radius: 26,
-        color: this.state.busy ? COLORS.accentPressed : COLORS.accent,
+        color: this.state.acting ? COLORS.accentPressed : COLORS.accent,
         pressed: COLORS.accentPressed,
         textColor: COLORS.onAccent,
         onClick
@@ -325,8 +327,11 @@ Page(
 
     renderSyncing() {
       this.panel(180, 132, COLORS.surface, 26)
-      this.text('Syncing', 210, 34, 26, COLORS.text)
-      this.text('Talking to your phone', 250, 30, 20, COLORS.muted)
+      this.text('Syncing', 206, 34, 26, COLORS.text)
+      this.text('Talking to your phone', 244, 30, 20, COLORS.muted)
+      // Why there was nothing to draw. The developer bridge shows the same
+      // line, but this screen is reachable without one.
+      if (this.state.restoreNote) this.text(this.state.restoreNote, 278, 24, 15, COLORS.dim)
     },
 
     renderMessage(title, body, action) {
@@ -354,7 +359,7 @@ Page(
         top: 56,
         height: cardHeight,
         radius: 22,
-        color: this.state.busy ? COLORS.accentPressed : COLORS.accent,
+        color: this.state.acting ? COLORS.accentPressed : COLORS.accent,
         pressed: COLORS.accentPressed,
         onClick: () => this.startEdit()
       })
@@ -394,7 +399,7 @@ Page(
       })
 
       this.button({
-        label: this.state.busy ? 'Stopping' : 'Stop timer',
+        label: this.state.acting ? 'Stopping' : 'Stop timer',
         top: PRIMARY_TOP,
         height: 92,
         color: COLORS.deep,
@@ -461,7 +466,7 @@ Page(
       }
 
       const selected = presets[this.state.presetIndex] || presets[0]
-      this.primaryButton(this.state.busy ? 'Starting' : 'Start timer', PRIMARY_TOP, () =>
+      this.primaryButton(this.state.acting ? 'Starting' : 'Start timer', PRIMARY_TOP, () =>
         this.start(selected)
       )
     },
@@ -507,14 +512,14 @@ Page(
     },
 
     startEdit() {
-      if (this.state.busy) return
+      if (this.state.acting) return
       this.touch()
       this.state.mode = 'edit'
       this.state.presetIndex = 0
       this.render()
     },
     cancelEdit() {
-      if (this.state.busy) return
+      if (this.state.acting) return
       this.touch()
       this.state.mode = 'view'
       this.render()
@@ -535,12 +540,12 @@ Page(
             projectName: preset.projectName
           }
         },
-        { showBusy: true, thenMode: 'view' }
+        { acting: true, thenMode: 'view' }
       )
     },
 
     selectPreset(index) {
-      if (this.state.busy || index < 0) return
+      if (this.state.acting || index < 0) return
       this.touch()
       this.state.presetIndex = index
       this.render()
@@ -554,16 +559,26 @@ Page(
 
     // ---- side-service calls -------------------------------------------------
 
-    /** Runs one phone request, ignoring replies that a newer request replaced. */
-    run(payload, { showBusy, thenMode } = {}) {
-      if (this.state.busy) return
+    /**
+     * Runs one phone request, ignoring replies that a newer request replaced.
+     *
+     * A tap may interrupt a status read: the screen is drawn from the cache
+     * and behaves as though it is right, so a button that looks live has to be
+     * live. Bumping the generation makes the read's reply be dropped. Two
+     * actions may not overlap — the phone refuses that anyway — and a second
+     * status read while one is in flight is simply redundant.
+     */
+    run(payload, { acting, thenMode } = {}) {
+      if (this.state.acting) return
+      if (!acting && this.state.reading) return
       this.touch()
       this.adoptLiveTransport()
 
       const generation = ++this.state.requestGeneration
-      this.state.busy = true
+      this.state.reading = !acting
+      this.state.acting = Boolean(acting)
       this.state.error = ''
-      if (showBusy) this.render()
+      if (acting) this.render()
 
       const isCurrent = () => this.state.mounted && generation === this.state.requestGeneration
 
@@ -596,26 +611,40 @@ Page(
         })
         .finally(() => {
           if (!isCurrent()) return
-          this.state.busy = false
+          this.state.reading = false
+          this.state.acting = false
           this.render()
         })
     },
 
     // ---- the watch's own copy of the last screen -----------------------------
 
-    /** Draws from storage on launch, so opening the app never shows a spinner. */
+    /**
+     * Draws from storage on launch, so opening the app never shows a spinner.
+     *
+     * Every path records why. A spinner has three very different causes —
+     * nothing saved yet, a running timer held back as too old, or watch
+     * storage not working at all — and the last of those would otherwise fail
+     * silently on every launch, looking exactly like the first. The reason
+     * goes to the log and onto the spinner itself, because the log is only
+     * reachable with the developer bridge attached.
+     */
     restoreStatus() {
+      this.state.restoreNote = ''
       try {
         const saved = localStorage.getItem(STATUS_KEY, '')
-        if (!saved) return
+        if (!saved) return this.noteRestore('nothing saved yet')
+
         const { savedAt, status } = JSON.parse(saved) || {}
-        if (!status) return
+        if (!status) return this.noteRestore('saved entry held no screen')
 
         // A missing, negative or absurd age means the watch clock moved under
         // us; treat it as old rather than trusting it.
         const age = Date.now() - Number(savedAt)
         const trustworthy = Number.isFinite(age) && age >= 0 && age < RESTORE_RUNNING_MAX_AGE
-        if (status.running && !trustworthy) return
+        if (status.running && !trustworthy) {
+          return this.noteRestore(`held back, saved ${Math.round(age / 60000)}m ago`)
+        }
 
         this.state.status = status
         this.state.signature = status.signature || ''
@@ -623,17 +652,25 @@ Page(
         // phone answers, and the screen says so.
         this.state.checking = true
         this.state.stale = false
-      } catch (_) {
-        // A corrupt or absent entry just means the spinner, as before.
+        console.log(`restore: drew saved screen, ${Math.round(age / 1000)}s old`)
+      } catch (error) {
+        this.noteRestore(`watch storage failed — ${(error && error.message) || 'unknown'}`)
       }
+    },
+    /** Records why the spinner is showing, for the log and for the screen. */
+    noteRestore(reason) {
+      this.state.restoreNote = reason
+      console.log(`restore: ${reason}`)
     },
     saveStatus(status) {
       try {
         if (status && status.configured) {
           localStorage.setItem(STATUS_KEY, JSON.stringify({ savedAt: Date.now(), status }))
         }
-      } catch (_) {
-        // Storage is a nicety; failing to write it must not break the screen.
+      } catch (error) {
+        // Storage is a nicety; failing to write it must not break the screen,
+        // but it does explain a spinner on every launch.
+        console.log(`save: FAILED, next launch will show the spinner — ${error && error.message}`)
       }
     },
 
@@ -666,7 +703,9 @@ Page(
     refresh() {
       if (!this.state.mounted) return
       // Mid-action or mid-choice, come back later rather than move things.
-      if (this.state.busy || this.state.mode === 'edit') return this.schedulePoll(POLL_FALLBACK_MS)
+      if (this.state.acting || this.state.reading || this.state.mode === 'edit') {
+        return this.schedulePoll(POLL_FALLBACK_MS)
+      }
 
       this.adoptLiveTransport()
       const generation = this.state.requestGeneration
@@ -711,14 +750,14 @@ Page(
       this.run({ method: 'GET_STATUS' }, { thenMode: 'view' })
     },
     start(preset) {
-      this.run({ method: 'START', params: preset }, { showBusy: true })
+      this.run({ method: 'START', params: preset }, { acting: true })
     },
     stop() {
       const running = this.state.status && this.state.status.running
       if (!running) return
       this.run(
         { method: 'STOP', params: { entryId: running.id, workspaceId: running.workspaceId } },
-        { showBusy: true }
+        { acting: true }
       )
     }
   })

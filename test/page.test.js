@@ -1,7 +1,22 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
 import { loadPage } from '../tools/screens.mjs'
 import { localStorage, resetStorage } from '../tools/stubs/storage.mjs'
+
+/**
+ * The watch-side copy lives in @zos/storage, which throws "permission denied"
+ * without this declared. Nothing crashes when it does — restoreStatus catches
+ * it and falls back to the spinner — so the whole feature simply stops working
+ * silently. It shipped that way once already.
+ */
+test('app.json declares the permission the watch-side copy needs', () => {
+  const { permissions } = JSON.parse(readFileSync(new URL('../app.json', import.meta.url), 'utf8'))
+  assert.ok(
+    (permissions || []).includes('device:os.local_storage'),
+    `@zos/storage needs device:os.local_storage; app.json declares ${JSON.stringify(permissions)}`
+  )
+})
 
 const STATUS_KEY = 'wt.status'
 
@@ -131,6 +146,115 @@ test('a running timer saved under a shifted clock is not trusted', async () => {
   const missing = await makePage({ status: null })
   missing.restoreStatus()
   assert.equal(missing.state.status, null, 'no timestamp means no claim to freshness')
+})
+
+/**
+ * A spinner has three causes that look identical on screen, and the worst of
+ * them — watch storage not working — would otherwise recur silently on every
+ * launch while looking like an ordinary first run. Each one has to name itself
+ * somewhere reachable without the developer bridge attached.
+ */
+test('the spinner says why it had nothing to draw', async () => {
+  resetStorage()
+  const first = await makePage({ status: null })
+  first.restoreStatus()
+  assert.match(first.state.restoreNote, /nothing saved/i)
+  assert.ok(texts(await drawn(first)).includes(first.state.restoreNote), 'the reason should be on screen')
+
+  store(SAVED_RUNNING, 3 * 24 * HOUR)
+  const withheld = await makePage({ status: null })
+  withheld.restoreStatus()
+  assert.match(withheld.state.restoreNote, /held back/i)
+  assert.match(withheld.state.restoreNote, /4320m/, 'it should say how old, so the limit can be judged')
+
+  resetStorage({ [STATUS_KEY]: '{not json' })
+  const broken = await makePage({ status: null })
+  broken.restoreStatus()
+  assert.match(broken.state.restoreNote, /storage failed/i)
+
+  // Valid JSON that simply holds no screen is its own branch.
+  resetStorage({ [STATUS_KEY]: JSON.stringify({ savedAt: Date.now() }) })
+  const empty = await makePage({ status: null })
+  empty.restoreStatus()
+  assert.equal(empty.state.status, null)
+  assert.match(empty.state.restoreNote, /held no screen/i)
+})
+
+/**
+ * The failure that actually shipped: @zos/storage throwing outright, which
+ * the JSON fixtures above never reach because they get as far as parsing.
+ */
+test('storage refusing to answer is reported, and reaches the screen', async () => {
+  const original = localStorage.getItem
+  localStorage.getItem = () => {
+    throw new Error('permission denied')
+  }
+
+  try {
+    const page = await makePage({ status: null })
+    page.restoreStatus()
+
+    assert.equal(page.state.status, null, 'nothing to draw, so the spinner stands')
+    assert.match(page.state.restoreNote, /storage failed/i)
+    assert.match(page.state.restoreNote, /permission denied/i, 'the cause has to survive to the screen')
+    assert.ok(texts(await drawn(page)).includes(page.state.restoreNote))
+  } finally {
+    localStorage.getItem = original
+  }
+})
+
+test('a screen that restores cleanly leaves no reason behind', async () => {
+  store(SAVED)
+  const page = await makePage({ status: null })
+  // Seeded, or this passes whether or not a successful restore clears it.
+  page.state.restoreNote = 'a reason from an earlier launch'
+  page.restoreStatus()
+
+  assert.equal(page.state.restoreNote, '', 'nothing went wrong, so nothing to explain')
+  assert.ok(!texts(await drawn(page)).includes('Syncing'))
+})
+
+/**
+ * onInit fires the status read before build() paints, so the first frame of a
+ * restored screen is drawn with a request in flight. That must not read as a
+ * pending action: the screen is drawn from the cache and behaves as though it
+ * is right, so the button says what it does, not what it is waiting on.
+ */
+test('a restored screen offers to stop the timer, not "Stopping"', async () => {
+  const page = await makePage({ status: SAVED_RUNNING, checking: true, reading: true })
+  const labels = texts(await drawn(page))
+
+  assert.ok(labels.includes('Stop timer'), `expected a live Stop timer button, got ${JSON.stringify(labels)}`)
+  assert.ok(!labels.includes('Stopping'), 'a status read is not a pending stop')
+  // The quiet note is the honest signal that a reply is outstanding.
+  assert.ok(labels.includes('Checking'))
+})
+
+test('a pending stop does say Stopping', async () => {
+  const page = await makePage({ status: SAVED_RUNNING, acting: true })
+  const labels = texts(await drawn(page))
+  assert.ok(labels.includes('Stopping'), 'a real pending action still says so')
+})
+
+test('a tap may interrupt a status read, but not another action', async () => {
+  const page = await makePage({ status: SAVED_RUNNING })
+  const sent = []
+  page.request = (payload) => {
+    sent.push(payload.method)
+    return new Promise(() => {})
+  }
+
+  page.loadStatus()
+  assert.deepEqual(sent, ['GET_STATUS'])
+
+  // Tapping stop while that read is outstanding has to reach the phone, or
+  // the button was live in appearance only.
+  page.stop()
+  assert.deepEqual(sent, ['GET_STATUS', 'STOP'], 'the stop was swallowed by the in-flight read')
+
+  // A second action while the first is pending is refused, as the phone would.
+  page.stop()
+  assert.deepEqual(sent, ['GET_STATUS', 'STOP'], 'actions must not overlap')
 })
 
 test('the screen says whether it has been confirmed, and how stale it may be', async () => {

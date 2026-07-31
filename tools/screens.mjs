@@ -12,7 +12,16 @@ export const SCENARIOS = [
     title: 'Syncing',
     description:
       'The very first launch only, before the watch has ever saved a screen. After that, opening the app draws the saved one instead.',
+    transient: true,
     state: { status: null, error: '' }
+  },
+  {
+    name: '01c-syncing-reason',
+    title: 'Syncing, with the reason',
+    description:
+      'When the watch had nothing to draw, the spinner says why — so a storage failure, which would otherwise look exactly like a first launch, is visible without attaching the developer bridge.',
+    transient: true,
+    state: { status: null, error: '', restoreNote: 'watch storage failed — no such module' }
   },
   {
     name: '01b-restored',
@@ -108,7 +117,7 @@ export const SCENARIOS = [
     title: 'Starting',
     description: 'START TIMER pressed, waiting on Toggl.',
     state: {
-      busy: true,
+      acting: true,
       status: {
         configured: true,
         userName: 'Tyler Petrov',
@@ -176,7 +185,7 @@ export const SCENARIOS = [
     title: 'Stopping',
     description: 'STOP TIMER pressed, waiting on Toggl.',
     state: {
-      busy: true,
+      acting: true,
       status: {
         configured: true,
         userName: 'Tyler Petrov',
