@@ -135,8 +135,16 @@ async function syncAccount(expectedToken) {
   settingsLib.setItem(ACCOUNT_KEY, JSON.stringify(account))
   settingsLib.removeItem('connectionError')
 
-  if (!settingsLib.getItem('workspaceId') && account.defaultWorkspaceId) {
+  // A saved workspace can disappear from the account, most often after
+  // reconnecting with a different Toggl login. Leaving the stale id in place
+  // would start timers against a workspace the token cannot reach, so every
+  // sync re-pins the preference to the account default when it no longer
+  // matches. The project preference belongs to the old workspace, so it goes.
+  const savedWorkspaceId = settingsLib.getItem('workspaceId')
+  const known = account.workspaces.some((workspace) => String(workspace.id) === String(savedWorkspaceId))
+  if (!known && account.defaultWorkspaceId) {
     settingsLib.setItem('workspaceId', String(account.defaultWorkspaceId))
+    if (savedWorkspaceId) settingsLib.removeItem('projectId')
   }
   return account
 }
