@@ -793,8 +793,13 @@ Page(
       // Every card the report drew, by the stretch it totals. A card with
       // nothing in it drew no figure and has nothing here to correct: a timer
       // started before midnight adds to the week without adding to the day.
+      //
+      // Which is why the way out is an empty set rather than a missing week: a
+      // timer running since before Sunday belongs to no week and to every
+      // longer stretch, so the week can be the empty card while the payroll
+      // cycle is the one still counting.
       const drawn = this.state.reportWidgets
-      if (!drawn.week) return
+      if (Object.keys(drawn).length === 0) return
 
       this.reports().forEach((card) => {
         const widgets = drawn[card.key]

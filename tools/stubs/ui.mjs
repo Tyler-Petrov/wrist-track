@@ -33,7 +33,7 @@ function unrollList(list) {
 
   const typeAt = (index) => {
     const run = (list.data_type_config || []).find((item) => index >= item.start && index < item.end)
-    return run ? run.type_id : (list.item_config[0] || {}).type_id
+    return run ? run.type_id : ((list.item_config || [])[0] || {}).type_id
   }
 
   let top = list.y

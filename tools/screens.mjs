@@ -269,7 +269,7 @@ export const SCENARIOS = [
     title: 'Report',
     scrolls: true,
     description:
-      "The second tab, one swipe left of the month: two cards, the calendar week Sunday to Saturday and then today, each with its own total and its own breakdown by project. They count the very list the first tab is drawing, so they cost no request, and the timer still running is counted into both.",
+      'The second tab, one swipe left of the month: a card per stretch of time, the calendar week Sunday to Saturday, then today, then the payroll cycle in progress, with the cycle just finished joining them for a week after it closes. Each has its own total and its own breakdown by project, counted from the very list the first tab is drawing, so they cost no request, and the timer still running is counted into every stretch it belongs to. Only the first panel of it is shown here.',
     state: {
       tab: 1,
       status: {

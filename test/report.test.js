@@ -133,7 +133,7 @@ test('the timer still running counts towards the week', () => {
 test('a timer started before Sunday counts towards the week it began in', () => {
   const now = Date.now()
   const running = { projectName: 'WristTrack', start: weekDayAt(-1, 22) }
-  assert.equal(runningSeconds(running, now), 0)
+  assert.equal(runningSeconds(running, weekStart(now), weekEnd(now), now), 0)
   assert.equal(weekReport([], running, now).total, 0)
 })
 
@@ -466,6 +466,42 @@ test('the running total keeps up without redrawing anything', async () => {
   assert.equal(total(widgets), '3h 55m', 'the headline caught up in place')
   assert.ok(texts(widgets).some((text) => /55m running/.test(text)), 'the line under it too')
   assert.ok(widgets.filter((widget) => widget.text === '55m').length >= 1, 'and the project it runs under')
+})
+
+/**
+ * A timer running since before Sunday belongs to no week and to every longer
+ * stretch, so the week card can be the empty one while the payroll card is the
+ * one counting. Stopping at a missing week left that card frozen until
+ * something else redrew it.
+ */
+test('a card still counting is kept up even when the week card is empty', async () => {
+  const page = await makePage({ status: STATUS })
+  const nothing = { total: 0, running: 0, count: 0, projects: [], label: 'Aug 9-15' }
+  const cycle = {
+    total: 3600,
+    running: 3600,
+    count: 1,
+    label: 'Aug 11-25',
+    projects: [{ name: 'Admin', seconds: 3600, count: 1, running: 3600 }]
+  }
+  page.reports = () => [
+    { key: 'week', heading: 'This week · Aug 9-15', report: nothing },
+    { key: 'day', heading: 'Today', report: nothing },
+    { key: 'cycle', heading: 'Pay period · Aug 11-25', report: cycle }
+  ]
+
+  const widgets = await drawn(page, 1)
+  assert.ok(texts(widgets).includes('1h'), 'the cycle card drew its figure')
+
+  // Half an hour later, with the week still holding nothing at all.
+  cycle.total = 5400
+  cycle.projects[0].seconds = 5400
+  page.tick({ start: new Date().toISOString() })
+
+  assert.ok(
+    texts(widgets).includes('1h 30m'),
+    `the cycle figure should have caught up, got ${JSON.stringify(texts(widgets))}`
+  )
 })
 
 // ---- the tabs themselves ----------------------------------------------------

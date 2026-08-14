@@ -271,9 +271,11 @@ edge of something solid:
   stops where the bar starts. The bar is also the tap target, which is a far
   easier one than two dots.
 
-The week tab fits the panel on purpose, for the same reason: the longest few
-projects get a row each and the rest are added together into a last row, so the
-rows still sum to the total above them.
+The report tab is the other way about. Its cards are as tall as what is in them
+and every project gets a line, so it is the one screen that can outgrow the
+panel — and when it does, the page scrolls and the bar comes along at the end of
+the content. Only the month is held to fitting, because only the month has a
+list to do its scrolling for it.
 
 ## How the two tabs are built
 
@@ -297,11 +299,14 @@ the rest of the month.
 
 **The dots must not scroll away.** They did, when they were widgets on a page
 that scrolls, and moving them by hand from a scroll callback did not work on the
-watch either. Now nothing on the page scrolls at all: the month is a list that
-scrolls inside itself, and the week fits the panel, so the bar they sit in stays
-put by standing still. `test/report.test.js` asserts that neither tab draws
-anything under the bar, along with which dot each tab lights, and that a swipe
-with nowhere to go is left to the system.
+watch either. The month never scrolls the page now — its recordings are a list
+that scrolls inside its own box — so the bar there stays put by standing still.
+A report longer than the panel does scroll the page, and rather than let the bar
+ride up over a card it is placed at the foot of the content: at the top of the
+report, which is where a tab change lands, the bar is the last thing under the
+last card. `test/report.test.js` asserts that neither tab draws anything under
+the bar, that the month never reaches past the panel, along with which dot each
+tab lights, and that a swipe with nowhere to go is left to the system.
 
 ## What the report counts
 
