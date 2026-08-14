@@ -37,8 +37,8 @@ question. See [Staying in sync](#staying-in-sync) for why that matters.
 - Shows your past month of recordings as a scrolling list, newest first,
   grouped under a heading for each day that has any. Each row says the times
   it ran over and for how long. Tap a recording to start that job again.
-- Re-labels a running timer in place: tap a job below the clock and the
-  description and project change without resetting the elapsed time.
+- Re-labels a running timer in place: tap a recording below the live row and
+  the description and project change without resetting the elapsed time.
 - Handles an empty account, a rejected token, an offline phone and Toggl's
   hourly API limit, with a readable message for each.
 - No analytics, no ads, no developer-operated data collection.
@@ -213,10 +213,11 @@ Open **WristTrack** from the watch's app list.
   dates such as `Jul 24` beyond it. Days with nothing tracked do not appear.
   Each row reads `9:00-10:20 · 1h 20m · WristTrack`. Scroll down for the rest
   of the month; tap a recording to start that job again.
-- **Running** — the pink card shows the live clock. The jobs below it are
-  one-tap switches: tapping one re-labels the running entry without resetting
-  the clock. Tap the card itself for the full list.
-- **Stop timer** closes the entry in Toggl.
+- **Tracking** — the running entry is a row like the others at the top of the
+  list, wearing a stop mark instead of a play one, its second line the live
+  clock. Tap it to stop. The history stays on screen underneath, and tapping a
+  row there re-labels the running entry to that job without resetting the
+  clock.
 
 Your phone must be paired and online at the moment you press start or stop.
 

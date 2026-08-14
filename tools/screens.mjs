@@ -43,6 +43,7 @@ export const SCENARIOS = [
     title: 'Restored on launch',
     description:
       'Every launch after the first: the watch draws its saved screen immediately and marks it unconfirmed until the phone answers, usually within a second.',
+    scrolls: true,
     state: {
       checking: true,
       status: {
@@ -131,7 +132,9 @@ export const SCENARIOS = [
   {
     name: '06-running',
     title: 'Running',
-    description: 'A timer is running; the elapsed time ticks once a second.',
+    description:
+      'A timer is running. The live entry is a row like the others, with a stop mark and the elapsed time ticking once a second; the history stays on screen below it, and tapping a row switches the running timer to that job without resetting the clock.',
+    scrolls: true,
     state: {
       status: {
         configured: true,
@@ -155,36 +158,10 @@ export const SCENARIOS = [
     }
   },
   {
-    name: '06b-edit-running',
-    title: 'Edit a running timer',
-    description: 'EDIT on the running screen re-labels the entry from your recent list.',
-    state: {
-      mode: 'edit',
-      status: {
-        configured: true,
-        userName: 'Tyler Petrov',
-        running: {
-          id: 4242,
-          workspaceId: 10,
-          description: 'Deep work',
-          label: 'Deep work',
-          subtitle: 'WristTrack',
-          summary: 'Deep work · WristTrack',
-          projectName: 'WristTrack',
-          start: RUNNING_START
-        },
-        presets: [
-          { description: 'Client call', label: 'Client call', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: daysAgoAt(1, 15), duration: 2700 },
-          { description: 'Invoicing', label: 'Invoicing', projectName: 'No project', projectId: null, workspaceId: 10, start: daysAgoAt(3, 11), duration: 1500 }
-        ]
-      },
-      error: ''
-    }
-  },
-  {
     name: '07-stopping',
     title: 'Stopping',
-    description: 'STOP TIMER pressed, waiting on Toggl.',
+    description: 'The live row tapped, waiting on Toggl.',
+    scrolls: true,
     state: {
       acting: true,
       status: {
@@ -210,6 +187,7 @@ export const SCENARIOS = [
   },
   {
     name: '07b-running-stale',
+    scrolls: true,
     title: 'Running, sync paused',
     description:
       "Toggl's hourly request allowance is spent, so the phone is serving its last known state. The clock keeps ticking, which is why the screen says so.",

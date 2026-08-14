@@ -222,18 +222,65 @@ test('a screen that restores cleanly leaves no reason behind', async () => {
  */
 test('a restored screen offers to stop the timer, not "Stopping"', async () => {
   const page = await makePage({ status: SAVED_RUNNING, checking: true, reading: true })
-  const labels = texts(await drawn(page))
+  const widgets = await drawn(page)
+  const labels = texts(widgets)
 
-  assert.ok(labels.includes('Stop timer'), `expected a live Stop timer button, got ${JSON.stringify(labels)}`)
+  assert.ok(
+    widgets.some((widget) => widget.type === 'IMG' && /stop/.test(String(widget.src))),
+    'the live row should offer to stop'
+  )
   assert.ok(!labels.includes('Stopping'), 'a status read is not a pending stop')
   // The quiet note is the honest signal that a reply is outstanding.
-  assert.ok(labels.includes('Checking'))
+  assert.ok(
+    labels.some((text) => /checking/i.test(text)),
+    `expected the unconfirmed note, got ${JSON.stringify(labels)}`
+  )
 })
 
 test('a pending stop does say Stopping', async () => {
   const page = await makePage({ status: SAVED_RUNNING, acting: true })
   const labels = texts(await drawn(page))
   assert.ok(labels.includes('Stopping'), 'a real pending action still says so')
+})
+
+/**
+ * The list used to disappear behind the running card, so switching jobs meant
+ * opening a second screen. The whole history stays on screen now: the live
+ * entry is a row like the others, and the rows below re-label it in place.
+ */
+test('the history stays on screen while a timer runs', async () => {
+  const history = [recording('Client call', 0, 15), recording('Invoicing', 2, 11)]
+  const page = await makePage({ status: { ...SAVED_RUNNING, presets: history } })
+  const sent = []
+  page.request = (payload) => {
+    sent.push(payload)
+    return new Promise(() => {})
+  }
+
+  const widgets = await drawn(page)
+  const labels = texts(widgets)
+  assert.ok(labels.includes('Deep work'), 'the running entry leads')
+  assert.ok(labels.includes('Client call') && labels.includes('Invoicing'), 'and the history follows it')
+  assert.ok(labels.includes('Today'), 'still grouped by day')
+
+  const rows = widgets.filter((widget) => widget.type === 'BUTTON')
+  assert.equal(rows.length, 3, 'the live entry plus every recording')
+
+  // The live row stops the timer; the rows below switch it without a restart.
+  rows[0].click_func()
+  assert.equal(sent[0].method, 'STOP')
+
+  const fresh = await makePage({ status: { ...SAVED_RUNNING, presets: history } })
+  const switches = []
+  fresh.request = (payload) => {
+    switches.push(payload)
+    return new Promise(() => {})
+  }
+  const freshRows = (await drawn(fresh)).filter((widget) => widget.type === 'BUTTON')
+  freshRows[1].click_func()
+  assert.equal(switches[0].method, 'UPDATE', 'a history row re-labels rather than starting a second timer')
+  assert.equal(switches[0].params.entryId, SAVED_RUNNING.running.id)
+  assert.equal(switches[0].params.description, 'Client call')
 })
 
 test('a tap may interrupt a status read, but not another action', async () => {
@@ -296,9 +343,8 @@ test('a reply is written back, so the next launch has something to draw', async 
 
 /**
  * The list the phone sends is a history: one row per recording, so the same
- * job can appear several times with different days and durations. That is
- * what the ready screen shows — but as switch targets, under the running card
- * and on the edit screen, a second row for the same job adds nothing.
+ * job can appear several times with different days and durations, and every
+ * one of them is drawn.
  */
 test('every recording is drawn as a row; the page scrolls instead of paging', async () => {
   const week = Array.from({ length: 8 }, (_, index) => ({
@@ -463,28 +509,6 @@ test('the week of history draws one row per recording, duplicates included', asy
   assert.equal(labels.filter((text) => text === 'Deep work').length, 2, 'both recordings are rows')
   assert.ok(labels.includes('Today · 1h 20m · WristTrack'))
   assert.ok(labels.includes('Mon · 2h · WristTrack'))
-})
-
-test('under the running card each job is offered once, newest recording first', async () => {
-  const history = [
-    { description: 'Client call', label: 'Client call', subtitle: 'Today · 30m', projectId: 21, projectName: 'Home Maintenance', workspaceId: 10, start: 'a' },
-    { description: 'Client call', label: 'Client call', subtitle: 'Mon · 45m', projectId: 21, projectName: 'Home Maintenance', workspaceId: 10, start: 'b' },
-    { description: 'Invoicing', label: 'Invoicing', subtitle: 'Sun · 15m', projectId: 22, projectName: 'Admin', workspaceId: 10, start: 'c' }
-  ]
-  const page = await makePage({ status: { ...SAVED_RUNNING, presets: history } })
-  const labels = texts(await drawn(page))
-
-  assert.equal(labels.filter((text) => text === 'Client call').length, 1, 'the same job twice is one switch target')
-  assert.ok(labels.includes('Invoicing'), 'the freed slot goes to the next distinct job')
-
-  const distinct = page.distinctJobs(history)
-  assert.deepEqual(distinct.map((item) => item.start), ['a', 'c'], 'the newest recording of each job represents it')
-
-  // Switch rows have no day headings, so the day folds back into the line.
-  const dated = page.distinctJobs([
-    { description: 'D', day: 'Mon', subtitle: '9:00-10:00 · 1h', projectId: 20, workspaceId: 10 }
-  ])
-  assert.equal(dated[0].subtitle, 'Mon · 9:00-10:00 · 1h')
 })
 
 test('polling stops once the app has been left alone', async () => {
