@@ -132,17 +132,26 @@ export function dayLabel(startMs, now = Date.now()) {
   return WEEKDAYS[start.getDay()]
 }
 
+/** A wall-clock stamp in the phone's local time: "9:05", "17:30". */
+export function clockLabel(ms) {
+  const time = new Date(ms)
+  const minutes = time.getMinutes()
+  return `${time.getHours()}:${minutes < 10 ? `0${minutes}` : minutes}`
+}
+
 /**
- * The second line of a history row: when it ran and for how long, plus the
- * project when the first line is the description. When the entry is
- * project-only the project already is the first line, so it is not repeated.
+ * The second line of a history row: which day, the tracked time range, how
+ * long it took, and the project when the first line is the description. When
+ * the entry is project-only the project already is the first line, so it is
+ * not repeated. The row ellipsises, so the segments run most to least vital.
  */
 export function historySubtitle({ description, projectName, start, duration }, now = Date.now()) {
   const startMs = parseStart(start)
   if (startMs === null || !(Number(duration) > 0)) {
     return presetSubtitle(description, projectName)
   }
-  const when = `${dayLabel(startMs, now)} · ${formatDuration(duration)}`
+  const range = `${clockLabel(startMs)}-${clockLabel(startMs + Number(duration) * 1000)}`
+  const when = `${dayLabel(startMs, now)} · ${range} · ${formatDuration(duration)}`
   if (description && projectName && projectName !== NO_PROJECT) {
     return `${when} · ${projectName}`
   }

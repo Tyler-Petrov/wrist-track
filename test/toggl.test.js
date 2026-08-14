@@ -10,6 +10,7 @@ import {
   asArray,
   buildAuthHeader,
   buildHistory,
+  clockLabel,
   createTogglClient,
   credentialTag,
   dayLabel,
@@ -126,10 +127,11 @@ test('a recording row says when it ran and for how long', () => {
   )
 
   // With a description the project still gets named; without one the project
-  // is already the first line, so the second line does not repeat it.
+  // is already the first line, so the second line does not repeat it. The
+  // tracked range sits between the day and the length.
   assert.deepEqual(
     history.map((item) => item.subtitle),
-    ['Today · 1h 20m · App', 'Yesterday · 5m', 'Fri · 2h']
+    ['Today · 9:00-10:20 · 1h 20m · App', 'Yesterday · 9:00-9:05 · 5m', 'Fri · 9:00-11:00 · 2h']
   )
   assert.deepEqual(history.map((item) => item.label), ['Review', 'App', 'Ship'])
   // The fields a re-start needs survive alongside the display ones.
@@ -148,6 +150,9 @@ test('durations and days read at wrist size', () => {
   assert.equal(dayLabel(Date.parse('2026-08-12T01:00:00Z'), now), 'Today')
   assert.equal(dayLabel(Date.parse('2026-08-11T23:00:00Z'), now), 'Yesterday')
   assert.equal(dayLabel(Date.parse('2026-08-09T12:00:00Z'), now), 'Sun')
+
+  assert.equal(clockLabel(Date.parse('2026-08-12T09:05:00Z')), '9:05')
+  assert.equal(clockLabel(Date.parse('2026-08-12T17:30:00Z')), '17:30')
 
   assert.equal(parseStart('2026-07-30T12:04:09+00:00'), Date.parse('2026-07-30T12:04:09Z'))
   assert.equal(parseStart('2026-07-30T14:04:09+02:00'), Date.parse('2026-07-30T12:04:09Z'))

@@ -300,6 +300,48 @@ test('a reply is written back, so the next launch has something to draw', async 
  * what the ready screen shows — but as switch targets, under the running card
  * and on the edit screen, a second row for the same job adds nothing.
  */
+test('every recording is drawn as a row; the page scrolls instead of paging', async () => {
+  const week = Array.from({ length: 8 }, (_, index) => ({
+    description: `Job ${index}`,
+    label: `Job ${index}`,
+    subtitle: 'Mon · 9:00-10:00 · 1h',
+    projectId: 20,
+    projectName: 'WristTrack',
+    workspaceId: 10,
+    start: `s${index}`
+  }))
+  const page = await makePage({ status: { ...SAVED, presets: week } })
+  const widgets = await drawn(page)
+  const labels = texts(widgets)
+
+  for (const item of week) {
+    assert.ok(labels.includes(item.label), `${item.label} should be a row, not behind a pager`)
+  }
+  assert.ok(!labels.includes('‹') && !labels.includes('›'), 'the pager is gone')
+  assert.ok(
+    widgets.some((widget) => widget.y + widget.h > 514),
+    'the list is expected to run past the panel, which is what the page scroll reaches'
+  )
+})
+
+test('tapping a recording starts that job', async () => {
+  const page = await makePage({ status: SAVED })
+  const sent = []
+  page.request = (payload) => {
+    sent.push(payload)
+    return new Promise(() => {})
+  }
+
+  const widgets = await drawn(page)
+  const rows = widgets.filter((widget) => widget.type === 'BUTTON' && widget.text === '')
+  assert.ok(rows.length >= 1, 'the recording should be drawn as a tappable row')
+
+  rows[0].click_func()
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].method, 'START')
+  assert.equal(sent[0].params.description, 'Deep work')
+})
+
 test('the week of history draws one row per recording, duplicates included', async () => {
   const twice = [
     { description: 'Deep work', label: 'Deep work', subtitle: 'Today · 1h 20m · WristTrack', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'a' },

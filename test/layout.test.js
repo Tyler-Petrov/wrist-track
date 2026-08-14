@@ -31,7 +31,11 @@ for (const scenario of SCENARIOS) {
       assert.ok(item.x >= 0, `${label} starts left of the panel (x=${item.x})`)
       assert.ok(item.y >= 0, `${label} starts above the panel (y=${item.y})`)
       assert.ok(item.x + item.w <= PANEL.width, `${label} runs past the right edge`)
-      assert.ok(item.y + item.h <= PANEL.height, `${label} runs past the bottom edge`)
+      // A scrolling screen is allowed to run past the bottom: that is what
+      // the platform's vertical page scroll exists to reach.
+      if (!scenario.scrolls) {
+        assert.ok(item.y + item.h <= PANEL.height, `${label} runs past the bottom edge`)
+      }
     }
   })
 
@@ -39,6 +43,10 @@ for (const scenario of SCENARIOS) {
     const widgets = await renderScenario(makePage, scenario)
     // The background fill is deliberately full-bleed.
     for (const item of widgets.filter((w) => w.w < PANEL.width)) {
+      // On a scrolling screen anything at or past the bottom corner zone is
+      // mid-list: it clips while passing through and clears once scrolled,
+      // so only the resting top of the layout is held to the corner rule.
+      if (scenario.scrolls && item.y + item.h > PANEL.height - CORNER_RADIUS) continue
       const inset = Math.max(cornerInset(item.y), cornerInset(item.y + item.h))
       const label = `${item.type} ${JSON.stringify(item.text ?? '')}`
       assert.ok(item.x >= inset, `${label} overlaps a corner (x=${item.x}, needs ${Math.ceil(inset)})`)

@@ -42,9 +42,11 @@ const ROW_HEIGHT = 78
 const EDGE = 26
 const ROW_WIDTH = 432 - EDGE * 2
 
-// The list shows this many jobs at once; anything further back is reached
-// with the compact pager that only appears when it is needed.
-const VISIBLE_ROWS = 3
+// The history draws every recording as a row and relies on the platform's
+// native vertical page scroll to reach the ones past the panel; the rows are
+// laid out from this baseline on a fixed pitch.
+const LIST_TOP = 68
+const ROW_PITCH = 88
 
 // The main action sits at the same height on every screen so it stays under
 // the thumb.
@@ -101,7 +103,6 @@ Page(
   BasePage({
     state: {
       status: null,
-      presetIndex: 0,
       widgets: [],
       timerWidget: null,
       interval: null,
@@ -247,33 +248,23 @@ Page(
      * drawn over it — Zepp text widgets do not take touches, so the button
      * underneath still receives them.
      */
-    jobRow(item, top, { selected = false, onClick } = {}) {
+    jobRow(item, top, { onClick } = {}) {
       this.button({
         label: '',
         top,
         height: ROW_HEIGHT,
         radius: ROW_RADIUS,
-        color: selected ? COLORS.surfaceRaised : COLORS.surface,
+        color: COLORS.surface,
         pressed: COLORS.surfacePressed,
         onClick
       })
-      if (selected) {
-        this.add(hmUI.widget.FILL_RECT, {
-          x: x(EDGE),
-          y: y(top + 10),
-          w: u(6),
-          h: u(ROW_HEIGHT - 20),
-          radius: u(3),
-          color: COLORS.accent
-        })
-      }
       this.line(item.label || item.description, {
         left: EDGE + 22,
         top: top + 12,
         width: ROW_WIDTH - 40,
         height: 28,
         size: 22,
-        color: selected ? COLORS.text : 0xf2e6f6
+        color: 0xf2e6f6
       })
       this.line(item.subtitle || item.projectName, {
         left: EDGE + 22,
@@ -281,7 +272,7 @@ Page(
         width: ROW_WIDTH - 40,
         height: 24,
         size: 16,
-        color: selected ? 0xc3a8cd : COLORS.muted
+        color: COLORS.muted
       })
     },
     // ---- screens ------------------------------------------------------------
@@ -425,12 +416,21 @@ Page(
       })
     },
 
+    /**
+     * The week of history, every recording a row, reached by scrolling. A tap
+     * starts that job again — the row is the button, as it already is for the
+     * switch targets under the running card.
+     */
     renderReady() {
       const presets = this.state.status.presets || []
-      const window = this.visibleWindow(presets)
 
       const note = this.statusNote()
-      this.text(note ? `This week · ${note.toLowerCase()}` : 'This week', 30, 26, 18, COLORS.muted)
+      const header = this.state.acting
+        ? 'Starting'
+        : note
+          ? `This week · ${note.toLowerCase()}`
+          : 'This week · tap to start'
+      this.text(header, 30, 26, 18, this.state.acting ? COLORS.accent : COLORS.muted)
 
       if (presets.length === 0) {
         this.panel(90, 120, COLORS.surface)
@@ -439,87 +439,35 @@ Page(
         return
       }
 
-      window.forEach((preset, index) => {
-        this.jobRow(preset, 68 + index * 88, {
-          selected: presets.indexOf(preset) === this.state.presetIndex,
-          onClick: () => this.selectPreset(presets.indexOf(preset))
+      presets.forEach((preset, index) => {
+        this.jobRow(preset, LIST_TOP + index * ROW_PITCH, {
+          onClick: () => this.start(preset)
         })
       })
-
-      if (presets.length > VISIBLE_ROWS) {
-        this.button({
-          label: '‹',
-          top: 336,
-          height: 40,
-          left: EDGE,
-          width: 104,
-          size: 22,
-          radius: 14,
-          color: COLORS.surface,
-          pressed: COLORS.surfacePressed,
-          onClick: () => this.movePreset(-1)
-        })
-        this.line(`${this.state.presetIndex + 1} of ${presets.length}`, {
-          left: EDGE + 116,
-          top: 336,
-          width: ROW_WIDTH - 232,
-          height: 40,
-          size: 17,
-          color: COLORS.dim
-        })
-        this.button({
-          label: '›',
-          top: 336,
-          height: 40,
-          left: 432 - EDGE - 104,
-          width: 104,
-          size: 22,
-          radius: 14,
-          color: COLORS.surface,
-          pressed: COLORS.surfacePressed,
-          onClick: () => this.movePreset(1)
-        })
-      }
-
-      const selected = presets[this.state.presetIndex] || presets[0]
-      this.primaryButton(this.state.acting ? 'Starting' : 'Start timer', PRIMARY_TOP, () =>
-        this.start(selected)
-      )
-    },
-
-    /** Keeps the selected job inside the three visible rows. */
-    visibleWindow(presets) {
-      if (presets.length <= VISIBLE_ROWS) return presets
-      const first = Math.min(
-        Math.max(0, this.state.presetIndex - 1),
-        presets.length - VISIBLE_ROWS
-      )
-      return presets.slice(first, first + VISIBLE_ROWS)
     },
 
     /** Re-labels the running entry, offering each distinct recent job once. */
     renderEdit(running) {
-      const presets = this.distinctJobs(this.state.status.presets)
-      const window = this.visibleWindow(presets)
+      const jobs = this.distinctJobs(this.state.status.presets)
 
       this.text('Change to', 30, 26, 18, COLORS.accent)
 
-      if (presets.length === 0) {
+      if (jobs.length === 0) {
         this.panel(90, 120, COLORS.surface)
         this.text('No other jobs', 118, 34, 24, COLORS.text)
         this.text('Track something else first', 152, 28, 18, COLORS.muted)
       } else {
-        window.forEach((preset, index) => {
-          this.jobRow(preset, 68 + index * 88, {
-            selected: presets.indexOf(preset) === this.state.presetIndex,
-            onClick: () => this.applyEdit(running, preset)
+        jobs.forEach((job, index) => {
+          this.jobRow(job, LIST_TOP + index * ROW_PITCH, {
+            onClick: () => this.applyEdit(running, job)
           })
         })
       }
 
+      // After the last row when the list runs long, at thumb height otherwise.
       this.button({
         label: 'Cancel',
-        top: PRIMARY_TOP,
+        top: Math.max(PRIMARY_TOP, LIST_TOP + jobs.length * ROW_PITCH + 12),
         height: 92,
         color: COLORS.surface,
         pressed: COLORS.surfacePressed,
@@ -531,7 +479,6 @@ Page(
       if (this.state.acting) return
       this.touch()
       this.state.mode = 'edit'
-      this.state.presetIndex = 0
       this.render()
     },
     cancelEdit() {
@@ -558,19 +505,6 @@ Page(
         },
         { acting: true, thenMode: 'view' }
       )
-    },
-
-    selectPreset(index) {
-      if (this.state.acting || index < 0) return
-      this.touch()
-      this.state.presetIndex = index
-      this.render()
-    },
-    movePreset(direction) {
-      this.touch()
-      const length = this.state.status.presets.length
-      this.state.presetIndex = (this.state.presetIndex + direction + length) % length
-      this.render()
     },
 
     // ---- side-service calls -------------------------------------------------
@@ -614,7 +548,6 @@ Page(
           this.state.signature = result.signature || ''
           this.state.stale = Boolean(result.stale)
           this.state.checking = false
-          this.state.presetIndex = 0
           this.state.error = ''
           if (thenMode) this.state.mode = thenMode
           this.saveStatus(result)
@@ -751,7 +684,6 @@ Page(
           this.saveStatus(result)
           if (changed) {
             // Something moved elsewhere — Toggl on the phone, or the web app.
-            if (this.state.presetIndex >= (result.presets || []).length) this.state.presetIndex = 0
             this.render()
           }
           this.schedulePoll(result.nextPollMs)
