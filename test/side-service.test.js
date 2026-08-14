@@ -307,32 +307,41 @@ test('a stop landing mid-reload is not erased when the reload lands after it', a
     return originalFetch(request)
   }
 
-  ageStatus(side, STATUS_MAX_AGE + 1)
-  ageHistory(side, HISTORY_MAX_AGE + 1)
-  calls.length = 0
+  // An assertion throwing must still release the gate and put the real fetch
+  // back. The side service is imported once for the whole file, so a reload
+  // left parked here keeps its in-flight flag set: harmless only because no
+  // later test needs a background reload, which is not a property worth
+  // depending on.
+  try {
+    ageStatus(side, STATUS_MAX_AGE + 1)
+    ageHistory(side, HISTORY_MAX_AGE + 1)
+    calls.length = 0
 
-  // The history is expired, not empty, so this is answered from cache at
-  // once and the re-read is kicked off behind it, unawaited.
-  const polled = await send('GET_STATUS')
-  assert.equal(polled.running.id, 4242)
+    // The history is expired, not empty, so this is answered from cache at
+    // once and the re-read is kicked off behind it, unawaited.
+    const polled = await send('GET_STATUS')
+    assert.equal(polled.running.id, 4242)
 
-  // Elsewhere, the timer is stopped before that re-read comes back.
-  state.current = null
-  const stopped = await send('STOP', { entryId: 4242, workspaceId: 10 })
-  assert.equal(stopped.presets[0].start, START, 'the stop is recorded locally at once')
+    // Elsewhere, the timer is stopped before that re-read comes back.
+    state.current = null
+    const stopped = await send('STOP', { entryId: 4242, workspaceId: 10 })
+    assert.equal(stopped.presets[0].start, START, 'the stop is recorded locally at once')
 
-  // Now the stale read — taken before the stop — lands.
-  releaseRecent()
-  await settle()
+    // Now the stale read — taken before the stop — lands.
+    releaseRecent()
+    await settle()
 
-  const after = await send('GET_STATUS')
-  assert.equal(
-    after.presets.filter((p) => p.start === START).length,
-    1,
-    'the recording made while the reload was in flight must survive it landing'
-  )
-
-  globalThis.fetch = originalFetch
+    const after = await send('GET_STATUS')
+    assert.equal(
+      after.presets.filter((p) => p.start === START).length,
+      1,
+      'the recording made while the reload was in flight must survive it landing'
+    )
+  } finally {
+    releaseRecent()
+    await settle()
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('an exhausted allowance serves the cache instead of spending a request', async () => {
