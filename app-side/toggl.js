@@ -143,10 +143,13 @@ export function clockLabel(ms) {
 }
 
 /**
- * The second line of a history row: which day, the tracked time range, how
- * long it took, and the project when the first line is the description. When
- * the entry is project-only the project already is the first line, so it is
- * not repeated. The row ellipsises, so the segments run most to least vital.
+ * The second line of a history row: the tracked time range, how long it took,
+ * and the project when the first line is the description. When the entry is
+ * project-only the project already is the first line, so it is not repeated.
+ * The day is deliberately not here — it travels beside the subtitle as `day`,
+ * because the history screen groups rows under day headings and repeating the
+ * heading in every row would be noise. The row ellipsises, so the segments
+ * run most to least vital.
  */
 export function historySubtitle({ description, projectName, start, duration }, now = Date.now()) {
   const startMs = parseStart(start)
@@ -154,11 +157,18 @@ export function historySubtitle({ description, projectName, start, duration }, n
     return presetSubtitle(description, projectName)
   }
   const range = `${clockLabel(startMs)}-${clockLabel(startMs + Number(duration) * 1000)}`
-  const when = `${dayLabel(startMs, now)} · ${range} · ${formatDuration(duration)}`
+  const when = `${range} · ${formatDuration(duration)}`
   if (description && projectName && projectName !== NO_PROJECT) {
     return `${when} · ${projectName}`
   }
   return when
+}
+
+/** The day heading a recording sorts under, or null without a usable start. */
+export function historyDay({ start, duration }, now = Date.now()) {
+  const startMs = parseStart(start)
+  if (startMs === null || !(Number(duration) > 0)) return null
+  return dayLabel(startMs, now)
 }
 
 /**
@@ -286,6 +296,7 @@ export function buildHistory(entries, account, settings, now = Date.now()) {
         start: entry.start,
         duration: Number(entry.duration) || 0
       }
+      item.day = historyDay(item, now)
       item.subtitle = historySubtitle(item, now)
       return item
     })

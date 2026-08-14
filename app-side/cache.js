@@ -1,6 +1,6 @@
 // Extension included deliberately: unlike the rest of app-side/, this module
 // is imported directly by the tests, so Node's ESM resolver has to find it.
-import { HISTORY_LIMIT, entrySummary, historySubtitle, parseStart } from './toggl.js'
+import { HISTORY_LIMIT, entrySummary, historyDay, historySubtitle, parseStart } from './toggl.js'
 
 /**
  * Toggl's Free plan allows 30 API requests per hour per user on a sliding
@@ -98,7 +98,7 @@ export function statusSignature(status) {
   // the row says — a background re-read that corrects a locally estimated
   // duration changes the subtitle without changing the key.
   const presets = (status.presets || [])
-    .map((item) => `${presetKey(item)}@${item.start || ''}/${item.duration || 0}/${item.label || ''}/${item.subtitle || ''}`)
+    .map((item) => `${presetKey(item)}@${item.start || ''}/${item.duration || 0}/${item.day || ''}/${item.label || ''}/${item.subtitle || ''}`)
     .join('|')
   return `${head}#${presets}`
 }
@@ -171,6 +171,7 @@ export function entryAsHistoryItem(running, now = Date.now()) {
   const startMs = parseStart(running.start)
   const duration = startMs === null ? 0 : Math.max(1, Math.round((now - startMs) / 1000))
   const item = { ...entryAsPreset(running), start: running.start, duration }
+  item.day = historyDay(item, now)
   item.subtitle = historySubtitle(item, now)
   return item
 }

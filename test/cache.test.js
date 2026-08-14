@@ -211,11 +211,13 @@ test('a stopped entry becomes a recording with its duration worked out locally',
   assert.equal(item.start, running.start)
   assert.match(item.subtitle, /1h 20m/)
   assert.match(item.subtitle, /WristTrack/, 'the project is still named beside the length')
+  assert.ok(item.day, 'the recording knows which day heading it sorts under')
 
   // A start the parser cannot read still yields a row, without a made-up length.
   const odd = entryAsHistoryItem({ ...running, start: 'garbage' }, now)
   assert.equal(odd.duration, 0)
   assert.equal(odd.subtitle, 'WristTrack')
+  assert.equal(odd.day, null)
 })
 
 test('re-labelling keeps the entry identity and start time', () => {

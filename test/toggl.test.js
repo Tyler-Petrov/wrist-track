@@ -18,6 +18,7 @@ import {
   entrySummary,
   formatDuration,
   friendlyError,
+  historyDay,
   historySubtitle,
   makeStartPayload,
   parseBody,
@@ -128,13 +129,15 @@ test('a recording row says when it ran and for how long', () => {
   )
 
   // With a description the project still gets named; without one the project
-  // is already the first line, so the second line does not repeat it. The
-  // tracked range sits between the day and the length, and past the last
-  // week the day becomes a date, since weekday names repeat inside a month.
+  // is already the first line, so the second line does not repeat it. The day
+  // travels separately: the watch groups rows under day headings, so baking
+  // it into every subtitle would repeat the heading. Past the last week the
+  // day becomes a date, since weekday names repeat inside a month.
   assert.deepEqual(
     history.map((item) => item.subtitle),
-    ['Today · 9:00-10:20 · 1h 20m · App', 'Yesterday · 9:00-9:05 · 5m', 'Fri · 9:00-11:00 · 2h', 'Jul 20 · 9:00-10:00 · 1h']
+    ['9:00-10:20 · 1h 20m · App', '9:00-9:05 · 5m', '9:00-11:00 · 2h', '9:00-10:00 · 1h']
   )
+  assert.deepEqual(history.map((item) => item.day), ['Today', 'Yesterday', 'Fri', 'Jul 20'])
   assert.deepEqual(history.map((item) => item.label), ['Review', 'App', 'Ship', 'Plan'])
   // The fields a re-start needs survive alongside the display ones.
   assert.equal(history[0].start, '2026-08-12T09:00:00Z')
@@ -164,9 +167,11 @@ test('durations and days read at wrist size', () => {
   assert.equal(parseStart('not a date'), null)
 })
 
-test('a recording missing its stamps falls back to the old subtitle', () => {
+test('a recording missing its stamps falls back to the old subtitle, and no day', () => {
   assert.equal(historySubtitle({ description: 'Review', projectName: 'App' }), 'App')
   assert.equal(historySubtitle({ description: '', projectName: 'App', start: 'garbage', duration: 60 }), 'No description')
+  assert.equal(historyDay({ start: 'garbage', duration: 60 }), null)
+  assert.equal(historyDay({ start: '2026-08-12T09:00:00Z' }), null)
 })
 
 test('only sends public timer fields to the watch', () => {

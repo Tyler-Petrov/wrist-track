@@ -324,6 +324,33 @@ test('every recording is drawn as a row; the page scrolls instead of paging', as
   )
 })
 
+test('recordings group under one centred heading per day, tracked days only', async () => {
+  const grouped = [
+    { description: 'A', label: 'A', day: 'Today', subtitle: '9:00-10:00 · 1h', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'a' },
+    { description: 'B', label: 'B', day: 'Today', subtitle: '7:00-7:30 · 30m', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'b' },
+    { description: 'C', label: 'C', day: 'Jul 24', subtitle: '9:00-11:00 · 2h', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'c' }
+  ]
+  const page = await makePage({ status: { ...SAVED, presets: grouped } })
+  const widgets = await drawn(page)
+  const labels = texts(widgets)
+
+  // One heading per day that has recordings — days with none simply never
+  // appear, and the day is not repeated inside the rows beneath it.
+  assert.equal(labels.filter((text) => text === 'Today').length, 1)
+  assert.equal(labels.filter((text) => text === 'Jul 24').length, 1)
+
+  const heading = widgets.find((widget) => widget.text === 'Jul 24')
+  const row = widgets.find((widget) => widget.text === 'C')
+  assert.ok(heading.y < row.y, 'the heading sits above its day')
+  assert.equal(heading.align_h, 'CENTER_H', 'day headings are centred')
+
+  const subtitle = widgets.find((widget) => widget.text === '9:00-11:00 · 2h')
+  assert.ok(
+    heading.text_size > subtitle.text_size,
+    'the heading is a touch bigger than the row subtitle'
+  )
+})
+
 test('tapping a recording starts that job', async () => {
   const page = await makePage({ status: SAVED })
   const sent = []
@@ -369,6 +396,12 @@ test('under the running card each job is offered once, newest recording first', 
 
   const distinct = page.distinctJobs(history)
   assert.deepEqual(distinct.map((item) => item.start), ['a', 'c'], 'the newest recording of each job represents it')
+
+  // Switch rows have no day headings, so the day folds back into the line.
+  const dated = page.distinctJobs([
+    { description: 'D', day: 'Mon', subtitle: '9:00-10:00 · 1h', projectId: 20, workspaceId: 10 }
+  ])
+  assert.equal(dated[0].subtitle, 'Mon · 9:00-10:00 · 1h')
 })
 
 test('polling stops once the app has been left alone', async () => {

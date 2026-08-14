@@ -48,6 +48,9 @@ const ROW_WIDTH = 432 - EDGE * 2
 const LIST_TOP = 68
 const ROW_PITCH = 88
 
+// Breathing room between one day's last recording and the next day's heading.
+const DAY_GAP = 14
+
 // The main action sits at the same height on every screen so it stays under
 // the thumb.
 const PRIMARY_TOP = 380
@@ -336,16 +339,19 @@ Page(
      * The history lists every recording, so the same job can appear many
      * times. As something to switch to — under the running card and on the
      * edit screen — a second row for the same job adds nothing, so only the
-     * newest recording of each is offered there.
+     * newest recording of each is offered there. Those screens have no day
+     * headings, so the day folds back into the subtitle.
      */
     distinctJobs(list) {
       const seen = {}
-      return (list || []).filter((item) => {
-        const key = `${item.workspaceId}:${item.projectId || 0}:${item.description}`
-        if (seen[key]) return false
-        seen[key] = true
-        return true
-      })
+      return (list || [])
+        .filter((item) => {
+          const key = `${item.workspaceId}:${item.projectId || 0}:${item.description}`
+          if (seen[key]) return false
+          seen[key] = true
+          return true
+        })
+        .map((item) => (item.day ? { ...item, subtitle: `${item.day} · ${item.subtitle}` } : item))
     },
 
     /** The live entry as a filled card, with the next jobs one tap away. */
@@ -439,10 +445,21 @@ Page(
         return
       }
 
-      presets.forEach((preset, index) => {
-        this.jobRow(preset, LIST_TOP + index * ROW_PITCH, {
-          onClick: () => this.start(preset)
-        })
+      // Grouped under day headings. The list arrives newest first, so each
+      // day's recordings are already contiguous; a day with nothing tracked
+      // simply never comes up. Rows without a day — an old saved cache, or
+      // the configured-default fallback — draw ungrouped.
+      let top = LIST_TOP
+      let currentDay = null
+      presets.forEach((preset) => {
+        if (preset.day && preset.day !== currentDay) {
+          if (currentDay !== null) top += DAY_GAP
+          this.text(preset.day, top, 28, 19, COLORS.muted)
+          top += 38
+          currentDay = preset.day
+        }
+        this.jobRow(preset, top, { onClick: () => this.start(preset) })
+        top += ROW_PITCH
       })
     },
 
