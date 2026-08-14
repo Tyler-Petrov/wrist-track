@@ -324,31 +324,114 @@ test('every recording is drawn as a row; the page scrolls instead of paging', as
   )
 })
 
+/** A recording that really ran `days` ago, so the watch dates it itself. */
+const recording = (label, days, hour, duration = 3600) => {
+  const when = new Date()
+  when.setDate(when.getDate() - days)
+  when.setHours(hour, 0, 0, 0)
+  return {
+    description: label,
+    label,
+    projectId: 20,
+    projectName: 'WristTrack',
+    workspaceId: 10,
+    start: when.toISOString(),
+    duration
+  }
+}
+
 test('recordings group under one centred heading per day, tracked days only', async () => {
-  const grouped = [
-    { description: 'A', label: 'A', day: 'Today', subtitle: '9:00-10:00 · 1h', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'a' },
-    { description: 'B', label: 'B', day: 'Today', subtitle: '7:00-7:30 · 30m', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'b' },
-    { description: 'C', label: 'C', day: 'Jul 24', subtitle: '9:00-11:00 · 2h', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'c' }
-  ]
-  const page = await makePage({ status: { ...SAVED, presets: grouped } })
+  const page = await makePage({
+    status: {
+      ...SAVED,
+      presets: [recording('A', 0, 9), recording('B', 0, 7), recording('C', 2, 9)]
+    }
+  })
   const widgets = await drawn(page)
   const labels = texts(widgets)
 
-  // One heading per day that has recordings — days with none simply never
-  // appear, and the day is not repeated inside the rows beneath it.
+  // One heading per day that has recordings — the untracked day between them
+  // never appears — and the day is not repeated inside the rows beneath it.
   assert.equal(labels.filter((text) => text === 'Today').length, 1)
-  assert.equal(labels.filter((text) => text === 'Jul 24').length, 1)
+  assert.equal(labels.filter((text) => text === 'Yesterday').length, 0, 'nothing ran yesterday')
 
-  const heading = widgets.find((widget) => widget.text === 'Jul 24')
-  const row = widgets.find((widget) => widget.text === 'C')
-  assert.ok(heading.y < row.y, 'the heading sits above its day')
+  const heading = widgets.find((widget) => widget.text === 'Today')
+  const first = widgets.find((widget) => widget.text === 'A')
+  assert.ok(heading.y < first.y, 'the heading sits above its day')
   assert.equal(heading.align_h, 'CENTER_H', 'day headings are centred')
 
-  const subtitle = widgets.find((widget) => widget.text === '9:00-11:00 · 2h')
+  const subtitle = widgets.find((widget) => /^\d{1,2}:\d{2}-/.test(String(widget.text ?? '')))
+  assert.equal(heading.color, subtitle.color, 'the heading shares the subtitle colour')
+  assert.ok(heading.text_size > subtitle.text_size, 'and is a touch bigger')
+
+  // The third recording is two days back, so it gets its own heading below.
+  const third = widgets.find((widget) => widget.text === 'C')
+  const headings = widgets.filter((widget) => widget.align_h === 'CENTER_H' && widget.y < third.y)
+  assert.ok(headings.length >= 2, 'each tracked day heads its own group')
+})
+
+/**
+ * The failure that shipped: a reply cached by an earlier build carried the day
+ * inside its subtitle and no day field at all, so nothing grouped and the
+ * times were missing — for the six hours that cache stays alive. The watch
+ * words its own rows from the raw start and duration, so an old reply renders
+ * as the current build draws it.
+ */
+test('a reply from an older build still groups and shows its times', async () => {
+  const stale = {
+    ...recording('Jairus', 1, 9, 3 * 3600 + 3 * 60),
+    // Exactly what the device drew: last version's wording, no day field.
+    subtitle: 'Yesterday · 3h 3m'
+  }
+  delete stale.day
+
+  const page = await makePage({ status: { ...SAVED, presets: [stale] } })
+  const labels = texts(await drawn(page))
+
+  assert.ok(labels.includes('Yesterday'), 'the row is grouped under a day heading it never carried')
   assert.ok(
-    heading.text_size > subtitle.text_size,
-    'the heading is a touch bigger than the row subtitle'
+    labels.some((text) => /^9:00-12:03 · 3h 3m/.test(text)),
+    `the times are drawn from the raw stamps, got ${JSON.stringify(labels)}`
   )
+  assert.ok(!labels.includes('Yesterday · 3h 3m'), 'the old wording is not what gets drawn')
+})
+
+test('the background covers a list that scrolls past the panel', async () => {
+  const week = Array.from({ length: 10 }, (_, index) => recording(`Job ${index}`, index, 9))
+  const page = await makePage({ status: { ...SAVED, presets: week } })
+  const widgets = await drawn(page)
+
+  const background = widgets[0]
+  const lowest = Math.max(...widgets.map((widget) => widget.y + widget.h))
+  assert.equal(background.type, 'FILL_RECT', 'the background is drawn first')
+  assert.ok(
+    background.h >= lowest,
+    `the background stops at ${background.h} with content reaching ${lowest}`
+  )
+
+  // And the last row is not flush against the end of the scroll.
+  const rows = widgets.filter((widget) => widget.type === 'BUTTON')
+  const lastRow = rows[rows.length - 1]
+  assert.ok(
+    background.h - (lastRow.y + lastRow.h) >= 40,
+    'there should be padding below the last entry'
+  )
+})
+
+test('every recording carries a play mark, which is not a second control', async () => {
+  const page = await makePage({ status: { ...SAVED, presets: [recording('A', 0, 9)] } })
+  const widgets = await drawn(page)
+
+  const icons = widgets.filter((widget) => widget.type === 'IMG')
+  assert.equal(icons.length, 1, 'one mark per recording')
+  assert.match(String(icons[0].src), /play/)
+  assert.equal(icons[0].click_func, undefined, 'the mark is decoration; the row takes the tap')
+
+  // It sits at the right-hand end of the row, clear of the text.
+  const row = widgets.find((widget) => widget.type === 'BUTTON')
+  const label = widgets.find((widget) => widget.text === 'A')
+  assert.ok(icons[0].x > label.x + label.w, 'the text stops before the mark')
+  assert.ok(icons[0].x + icons[0].w <= row.x + row.w, 'and the mark stays inside the row')
 })
 
 test('tapping a recording starts that job', async () => {

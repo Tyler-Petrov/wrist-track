@@ -1,3 +1,11 @@
+import {
+  NO_PROJECT,
+  historyDay,
+  historySubtitle,
+  presetLabel,
+  presetSubtitle
+} from '../shared/history.js'
+
 const API_ROOT = 'https://api.track.toggl.com/api/v9'
 const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
@@ -74,123 +82,24 @@ export function recentEntriesPath(now = Date.now(), days = HISTORY_DAYS) {
   )
 }
 
-const NO_PROJECT = 'No project'
-const NO_DESCRIPTION = 'No description'
-
 /**
- * Toggl returns RFC 3339 stamps such as `2026-07-30T12:04:09+00:00`. The
- * page's copy of this parser exists because QuickJS on the watch does not
- * reliably parse every offset form; the Side Service shares the caution.
+ * How a recording is worded lives in shared/history.js, because the watch
+ * renders these itself rather than trusting the strings in a reply — a cache
+ * outlives the build that wrote it. Re-exported so the phone side and the
+ * tests keep one import for the Toggl layer.
  */
-export function parseStart(value) {
-  const text = String(value || '')
-  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/)
-  if (!match) {
-    const fallback = new Date(text).getTime()
-    return Number.isNaN(fallback) ? null : fallback
-  }
-
-  const utc = Date.UTC(
-    Number(match[1]),
-    Number(match[2]) - 1,
-    Number(match[3]),
-    Number(match[4]),
-    Number(match[5]),
-    Number(match[6])
-  )
-  const zone = match[7]
-  if (!zone || zone === 'Z') return utc
-
-  const sign = zone[0] === '-' ? 1 : -1
-  const hours = Number(zone.slice(1, 3))
-  const minutes = Number(zone.replace(':', '').slice(3, 5))
-  return utc + sign * (hours * 60 + minutes) * 60000
-}
-
-/** "45m", "1h 20m", "2h" — a wrist-sized duration. */
-export function formatDuration(seconds) {
-  const total = Math.max(0, Math.round(Number(seconds) || 0))
-  const minutes = Math.round(total / 60)
-  if (minutes < 60) return `${Math.max(1, minutes)}m`
-  const hours = Math.floor(minutes / 60)
-  const rest = minutes % 60
-  return rest ? `${hours}h ${rest}m` : `${hours}h`
-}
-
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-/**
- * Which day a recording belongs to, in the phone's local time. Inside the
- * past week a weekday name reads naturally and cannot repeat; the month
- * reaches further back than that, so older recordings get the date instead.
- */
-export function dayLabel(startMs, now = Date.now()) {
-  const start = new Date(startMs)
-  const midnight = new Date(now)
-  midnight.setHours(0, 0, 0, 0)
-  if (startMs >= midnight.getTime()) return 'Today'
-  if (startMs >= midnight.getTime() - DAY_MS) return 'Yesterday'
-  if (startMs >= midnight.getTime() - 6 * DAY_MS) return WEEKDAYS[start.getDay()]
-  return `${MONTHS[start.getMonth()]} ${start.getDate()}`
-}
-
-/** A wall-clock stamp in the phone's local time: "9:05", "17:30". */
-export function clockLabel(ms) {
-  const time = new Date(ms)
-  const minutes = time.getMinutes()
-  return `${time.getHours()}:${minutes < 10 ? `0${minutes}` : minutes}`
-}
-
-/**
- * The second line of a history row: the tracked time range, how long it took,
- * and the project when the first line is the description. When the entry is
- * project-only the project already is the first line, so it is not repeated.
- * The day is deliberately not here — it travels beside the subtitle as `day`,
- * because the history screen groups rows under day headings and repeating the
- * heading in every row would be noise. The row ellipsises, so the segments
- * run most to least vital.
- */
-export function historySubtitle({ description, projectName, start, duration }, now = Date.now()) {
-  const startMs = parseStart(start)
-  if (startMs === null || !(Number(duration) > 0)) {
-    return presetSubtitle(description, projectName)
-  }
-  const range = `${clockLabel(startMs)}-${clockLabel(startMs + Number(duration) * 1000)}`
-  const when = `${range} · ${formatDuration(duration)}`
-  if (description && projectName && projectName !== NO_PROJECT) {
-    return `${when} · ${projectName}`
-  }
-  return when
-}
-
-/** The day heading a recording sorts under, or null without a usable start. */
-export function historyDay({ start, duration }, now = Date.now()) {
-  const startMs = parseStart(start)
-  if (startMs === null || !(Number(duration) > 0)) return null
-  return dayLabel(startMs, now)
-}
-
-/**
- * Toggl entries very often have no description — the project alone is the
- * label. Keep the real description for the API and show something readable.
- */
-export function presetLabel(description, projectName) {
-  if (description) return description
-  if (projectName && projectName !== NO_PROJECT) return projectName
-  return NO_DESCRIPTION
-}
-
-/**
- * Second line of the card. When the label already fell back to the project,
- * repeating it would read as "Home Maintenance / Home Maintenance", so say
- * what is actually missing instead.
- */
-export function presetSubtitle(description, projectName) {
-  if (description) return projectName || NO_PROJECT
-  if (projectName && projectName !== NO_PROJECT) return NO_DESCRIPTION
-  return NO_PROJECT
-}
+export {
+  NO_PROJECT,
+  NO_DESCRIPTION,
+  parseStart,
+  formatDuration,
+  clockLabel,
+  dayLabel,
+  presetLabel,
+  presetSubtitle,
+  historyDay,
+  historySubtitle
+} from '../shared/history.js'
 
 /**
  * The one line under the running clock. "Job · Project" when both exist, and

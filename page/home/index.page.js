@@ -3,6 +3,7 @@ import { setInterval, clearInterval, setTimeout, clearTimeout } from '@zos/timer
 import { localStorage } from '@zos/storage'
 import { BasePage } from '@zeppos/zml/base-page'
 import { COLORS, CONTENT_WIDTH, GUTTER, SCREEN, u, x, y } from './theme'
+import { historyDay, historySubtitle } from '../../shared/history'
 
 // The watch keeps its own copy of the last screen it drew, so opening the app
 // shows the timer immediately instead of a spinner while the phone is asked.
@@ -50,6 +51,15 @@ const ROW_PITCH = 88
 
 // Breathing room between one day's last recording and the next day's heading.
 const DAY_GAP = 14
+const DAY_HEADING_HEIGHT = 38
+
+// Clear space under the last row. Without it the final entry sits against the
+// bottom of the scroll, where the panel's corners cut into it.
+const LIST_BOTTOM_PAD = 56
+
+// The play mark on each row, drawn at its natural size from the asset.
+const PLAY_ICON = 'play.png'
+const PLAY_SIZE = 26
 
 // The main action sits at the same height on every screen so it stays under
 // the thumb.
@@ -251,7 +261,7 @@ Page(
      * drawn over it — Zepp text widgets do not take touches, so the button
      * underneath still receives them.
      */
-    jobRow(item, top, { onClick } = {}) {
+    jobRow(item, top, { onClick, subtitle } = {}) {
       this.button({
         label: '',
         top,
@@ -261,21 +271,32 @@ Page(
         pressed: COLORS.surfacePressed,
         onClick
       })
+      // Text and icon are drawn over the button rather than in it: Zepp text
+      // and image widgets do not take touches, so the whole row stays one tap
+      // target and the mark is decoration, not a second control.
+      const textWidth = ROW_WIDTH - 40 - PLAY_SIZE - 12
       this.line(item.label || item.description, {
         left: EDGE + 22,
         top: top + 12,
-        width: ROW_WIDTH - 40,
+        width: textWidth,
         height: 28,
         size: 22,
         color: 0xf2e6f6
       })
-      this.line(item.subtitle || item.projectName, {
+      this.line(subtitle || item.subtitle || item.projectName, {
         left: EDGE + 22,
         top: top + 42,
-        width: ROW_WIDTH - 40,
+        width: textWidth,
         height: 24,
         size: 16,
         color: COLORS.muted
+      })
+      this.add(hmUI.widget.IMG, {
+        x: x(EDGE + ROW_WIDTH - 22 - PLAY_SIZE),
+        y: y(top + Math.round((ROW_HEIGHT - PLAY_SIZE) / 2)),
+        w: u(PLAY_SIZE),
+        h: u(PLAY_SIZE),
+        src: PLAY_ICON
       })
     },
     // ---- screens ------------------------------------------------------------
@@ -284,11 +305,13 @@ Page(
       if (!this.state.mounted) return
       this.clear()
 
+      // Tall enough to cover a scrolling list, or the page scrolls the rows
+      // off the painted area and the bare panel shows through beneath them.
       this.add(hmUI.widget.FILL_RECT, {
         x: 0,
         y: 0,
         w: SCREEN.width,
-        h: SCREEN.height,
+        h: Math.max(SCREEN.height, u(this.contentHeight())),
         color: COLORS.background
       })
 
@@ -351,7 +374,10 @@ Page(
           seen[key] = true
           return true
         })
-        .map((item) => (item.day ? { ...item, subtitle: `${item.day} · ${item.subtitle}` } : item))
+        .map((item) => {
+          const day = this.dayOf(item)
+          return day ? { ...item, subtitle: `${day} · ${this.subtitleOf(item)}` } : item
+        })
     },
 
     /** The live entry as a filled card, with the next jobs one tap away. */
@@ -447,20 +473,73 @@ Page(
 
       // Grouped under day headings. The list arrives newest first, so each
       // day's recordings are already contiguous; a day with nothing tracked
-      // simply never comes up. Rows without a day — an old saved cache, or
-      // the configured-default fallback — draw ungrouped.
+      // simply never comes up. Rows with no usable start — the
+      // configured-default fallback — draw ungrouped.
       let top = LIST_TOP
       let currentDay = null
       presets.forEach((preset) => {
-        if (preset.day && preset.day !== currentDay) {
+        const day = this.dayOf(preset)
+        if (day && day !== currentDay) {
           if (currentDay !== null) top += DAY_GAP
-          this.text(preset.day, top, 28, 19, COLORS.muted)
-          top += 38
-          currentDay = preset.day
+          this.text(day, top, 28, 19, COLORS.muted)
+          top += DAY_HEADING_HEIGHT
+          currentDay = day
         }
-        this.jobRow(preset, top, { onClick: () => this.start(preset) })
+        this.jobRow(preset, top, {
+          subtitle: this.subtitleOf(preset),
+          onClick: () => this.start(preset)
+        })
         top += ROW_PITCH
       })
+    },
+
+    /**
+     * How a row is worded is decided here, not taken from the reply.
+     *
+     * A reply outlives the build that wrote it — the phone keeps its copy for
+     * six hours and the watch keeps its own across launches — so an update
+     * that changes the wording would otherwise show the previous version's
+     * until those caches turned over. It is also the only way "Today" stays
+     * right: computed on the phone before midnight, it is wrong by morning.
+     * The raw start and duration are what travel; the words are drawn from
+     * them, and only a reply too old to carry them falls back to its own.
+     */
+    dayOf(item) {
+      return historyDay(item) || item.day || null
+    },
+    subtitleOf(item) {
+      // historyDay answers only when the raw start and duration are both
+      // usable, which is exactly when the wording can be rebuilt. Without
+      // them the reply's own line is the better answer, not a worse one
+      // computed from nothing.
+      return historyDay(item) ? historySubtitle(item) : item.subtitle || item.projectName
+    },
+
+    /** How far the drawn screen reaches, so the background can cover it. */
+    contentHeight() {
+      if (this.state.error || !this.state.status || !this.state.status.configured) return SCREEN.height
+      const list =
+        this.state.status.running && this.state.mode !== 'edit'
+          ? []
+          : this.state.status.running
+            ? this.distinctJobs(this.state.status.presets)
+            : this.state.status.presets || []
+      if (list.length === 0) return SCREEN.height
+
+      let bottom = LIST_TOP
+      let currentDay = null
+      list.forEach((item) => {
+        const day = this.state.status.running ? null : this.dayOf(item)
+        if (day && day !== currentDay) {
+          if (currentDay !== null) bottom += DAY_GAP
+          bottom += DAY_HEADING_HEIGHT
+          currentDay = day
+        }
+        bottom += ROW_PITCH
+      })
+      // The edit screen keeps its Cancel button below the last row.
+      if (this.state.mode === 'edit') bottom += 92
+      return bottom + LIST_BOTTOM_PAD
     },
 
     /** Re-labels the running entry, offering each distinct recent job once. */
