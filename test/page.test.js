@@ -283,6 +283,50 @@ test('the history stays on screen while a timer runs', async () => {
   assert.equal(switches[0].params.description, 'Client call')
 })
 
+/**
+ * The history includes the running job's own past recordings — for somebody
+ * tracking one job all month, that is the entire list. Tapping one names the
+ * job that is already running, which Toggl would accept while changing
+ * nothing, so it must not spend a request from the hour's allowance.
+ */
+test('tapping a recording of the job already running does nothing', async () => {
+  const sameJob = {
+    ...recording('Deep work', 1, 9),
+    projectId: SAVED_RUNNING.running.projectId,
+    workspaceId: SAVED_RUNNING.running.workspaceId
+  }
+  const page = await makePage({ status: { ...SAVED_RUNNING, presets: [sameJob] } })
+  const sent = []
+  page.request = (payload) => {
+    sent.push(payload)
+    return new Promise(() => {})
+  }
+
+  const rows = (await drawn(page)).filter((widget) => widget.type === 'BUTTON')
+  rows[1].click_func()
+  assert.deepEqual(sent, [], 'switching a job to itself is not worth a request')
+
+  // The live row above it still stops, so the screen is not inert.
+  rows[0].click_func()
+  assert.equal(sent[0].method, 'STOP')
+})
+
+test('the running row wears the accent, and its mark reads against it', async () => {
+  const page = await makePage({ status: SAVED_RUNNING })
+  const widgets = await drawn(page)
+  const rows = widgets.filter((widget) => widget.type === 'BUTTON')
+
+  // The live row keeps the colour the old card had; the rest stay tonal.
+  assert.equal(rows[0].normal_color, 0xe57cd8, 'the running row is the accent pink')
+  rows.slice(1).forEach((row) => assert.equal(row.normal_color, 0x3d1c4c, 'the history rows are not'))
+
+  // Hours are not padded to two digits: a timer left running for days reads
+  // 372:18:53, which is still the clock.
+  const clock = widgets.find((widget) => /^\d+:\d{2}:\d{2}$/.test(String(widget.text ?? '')))
+  assert.ok(clock, 'the clock is on the running row')
+  assert.notEqual(clock.color, 0xe57cd8, 'pink on pink would be unreadable')
+})
+
 test('a tap may interrupt a status read, but not another action', async () => {
   const page = await makePage({ status: SAVED_RUNNING })
   const sent = []

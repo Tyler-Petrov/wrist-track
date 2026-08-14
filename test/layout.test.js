@@ -80,7 +80,7 @@ test('every screen offers a way forward', async () => {
 
 test('the running screen shows a live elapsed time, above the history', async () => {
   const widgets = await renderScenario(makePage, SCENARIOS.find((s) => s.name === '06-running'))
-  const clock = widgets.find((w) => /^\d{2}:\d{2}:\d{2}$/.test(String(w.text ?? '')))
+  const clock = widgets.find((w) => /^\d+:\d{2}:\d{2}$/.test(String(w.text ?? '')))
   assert.ok(clock, 'no HH:MM:SS readout on the running screen')
 
   // The running entry is a row like the others now, so the clock is no longer

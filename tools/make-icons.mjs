@@ -9,8 +9,11 @@ import { writeFileSync } from 'node:fs'
 
 const SIZE = 26
 const SUPERSAMPLE = 4
-// COLORS.accent from page/home/theme.js — the same pink as the primary action.
-const RGB = [0xe5, 0x7c, 0xd8]
+// From page/home/theme.js. Play sits on a tonal row, so it takes the accent
+// pink; stop only ever sits on the accent-filled running row, so it takes the
+// dark ink that reads against it.
+const ACCENT = [0xe5, 0x7c, 0xd8]
+const ON_ACCENT = [0x2c, 0x13, 0x38]
 
 /** Coverage of one pixel by the play triangle, sampled on a finer grid. */
 function playCoverage(px, py) {
@@ -82,13 +85,13 @@ function crc32(buffer) {
   return crc ^ -1
 }
 
-function render(coverage) {
+function render(coverage, rgb) {
   const raw = []
   for (let row = 0; row < SIZE; row += 1) {
     raw.push(0) // filter: none
     for (let column = 0; column < SIZE; column += 1) {
       const alpha = Math.round(coverage(column, row) * 255)
-      raw.push(RGB[0], RGB[1], RGB[2], alpha)
+      raw.push(rgb[0], rgb[1], rgb[2], alpha)
     }
   }
 
@@ -106,9 +109,12 @@ function render(coverage) {
 }
 
 for (const target of ['assets/bip-max.w432-s']) {
-  for (const [name, coverage] of [['play', playCoverage], ['stop', stopCoverage]]) {
+  for (const [name, coverage, rgb] of [
+    ['play', playCoverage, ACCENT],
+    ['stop', stopCoverage, ON_ACCENT]
+  ]) {
     const path = `${target}/${name}.png`
-    const png = render(coverage)
+    const png = render(coverage, rgb)
     writeFileSync(path, png)
     console.log(`${path}  ${SIZE}x${SIZE}  ${png.length} bytes`)
   }

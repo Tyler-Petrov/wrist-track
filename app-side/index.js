@@ -17,7 +17,6 @@ import {
   STATUS_MAX_AGE,
   SLOW_POLL_MS,
   entryAsHistoryItem,
-  entryAsPreset,
   isFresh,
   mergeFreshHistory,
   nextPollDelay,
@@ -27,8 +26,7 @@ import {
   refreshAllowance,
   relabelEntry,
   statusSignature,
-  withinWindow,
-  withoutPreset
+  withinWindow
 } from './cache'
 
 const ACCOUNT_KEY = 'togglAccount'
@@ -100,21 +98,20 @@ function writeStatus(cache) {
 /** Shapes a cache entry into the reply the watch renders from. */
 function present(cache, stale) {
   const running = cache.running || null
-  const list = cache.presets || []
   const status = {
     configured: true,
     userName: cache.userName,
     running,
     /**
-     * Switching to the job already running is meaningless, so it is kept out
-     * of the list — but only on the way to the watch. Removing it from the
-     * cache instead made the removal permanent: every job that ran was lost
-     * from the list until the next recent-entries read, and re-labelling away
-     * from one never offered it again. Filtering here also covers the case
-     * the duration check misses, where an earlier completed run of the same
-     * job is in the list under its own id.
+     * The whole history, the running job's own past recordings included.
+     *
+     * They used to be filtered out on the way to the watch, from back when
+     * this list was a menu of distinct jobs and offering the one already
+     * running was meaningless. As a history that reasoning inverts: those
+     * recordings happened, and somebody tracking one job all month would
+     * otherwise watch the list empty itself the moment they started it.
      */
-    presets: running ? withoutPreset(list, entryAsPreset(running)) : list,
+    presets: cache.presets || [],
     fetchedAt: cache.fetchedAt,
     stale: Boolean(stale),
     nextPollMs: nextPollDelay(readSpend())

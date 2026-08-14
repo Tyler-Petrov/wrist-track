@@ -262,14 +262,26 @@ Page(
      * drawn over it — Zepp text widgets do not take touches, so the button
      * underneath still receives them.
      */
-    jobRow(item, top, { onClick, subtitle, icon = PLAY_ICON, subtitleColor = COLORS.muted } = {}) {
+    jobRow(
+      item,
+      top,
+      {
+        onClick,
+        subtitle,
+        icon = PLAY_ICON,
+        color = COLORS.surface,
+        pressed = COLORS.surfacePressed,
+        labelColor = 0xf2e6f6,
+        subtitleColor = COLORS.muted
+      } = {}
+    ) {
       this.button({
         label: '',
         top,
         height: ROW_HEIGHT,
         radius: ROW_RADIUS,
-        color: COLORS.surface,
-        pressed: COLORS.surfacePressed,
+        color,
+        pressed,
         onClick
       })
       // Text and icon are drawn over the button rather than in it: Zepp text
@@ -282,7 +294,7 @@ Page(
         width: textWidth,
         height: 28,
         size: 22,
-        color: 0xf2e6f6
+        color: labelColor
       })
       const second = this.line(subtitle || item.subtitle || item.projectName, {
         left: EDGE + 22,
@@ -360,11 +372,7 @@ Page(
           'Check again'
         )
       }
-      const running = this.state.status.running
-      if (running) {
-        return this.renderRunning(running)
-      }
-      return this.renderReady()
+      return this.renderHistory()
     },
 
     /**
@@ -395,56 +403,52 @@ Page(
     },
 
     /**
-     * The live entry as a row like any other, with the whole history still
-     * below it. A tap on it stops the timer, which is what its stop mark
-     * says; a tap on a row below switches the running entry to that job
-     * without resetting the clock.
+     * One page: the month of history as rows, with the running entry
+     * conditionally at the top of it.
+     *
+     * The live row is the same size and shape as the rest, but wears the
+     * accent the old card had, so what is running reads at a glance without
+     * being a screen of its own. A tap on it stops the timer, which is what
+     * its stop mark says; a tap on any row below starts that job, or switches
+     * the running entry to it when one is already going.
      */
-    renderRunning(running) {
+    renderHistory() {
+      const running = this.state.status.running
+      const presets = this.state.status.presets || []
+
       const note = this.statusNote()
+      const busy = this.state.acting ? (running ? 'Stopping' : 'Starting') : ''
+      const lead = running ? 'Tracking · tap to stop' : 'This month · tap to start'
       this.text(
-        this.state.acting ? 'Stopping' : note ? `Tracking · ${note.toLowerCase()}` : 'Tracking · tap to stop',
+        busy || (note ? `${lead.split(' · ')[0]} · ${note.toLowerCase()}` : lead),
         30,
         26,
         18,
         this.state.acting ? COLORS.accent : COLORS.muted
       )
 
-      // The clock is the second line, ticking in place. Drawn in the accent
-      // so the live row reads differently from the finished ones below it.
-      this.state.timerWidget = this.jobRow(running, LIST_TOP, {
-        subtitle: formatElapsed(running.start),
-        subtitleColor: COLORS.accent,
-        icon: STOP_ICON,
-        onClick: () => this.stop()
-      })
-      this.state.interval = setInterval(() => {
-        if (this.state.timerWidget) {
-          this.state.timerWidget.setProperty(hmUI.prop.TEXT, formatElapsed(running.start))
-        }
-      }, 1000)
-
-      const { steps } = this.planList(this.state.status.presets, LIST_TOP + ROW_PITCH + DAY_GAP)
-      this.drawList(steps, (preset) => this.applyEdit(running, preset))
-    },
-
-    /**
-     * The month of history, every recording a row, reached by scrolling. A
-     * tap starts that job again — the row is the button, as it already is for
-     * the running row above it.
-     */
-    renderReady() {
-      const presets = this.state.status.presets || []
-
-      const note = this.statusNote()
-      const header = this.state.acting
-        ? 'Starting'
-        : note
-          ? `This month · ${note.toLowerCase()}`
-          : 'This month · tap to start'
-      this.text(header, 30, 26, 18, this.state.acting ? COLORS.accent : COLORS.muted)
+      let top = LIST_TOP
+      if (running) {
+        // The clock is the second line, ticking in place.
+        this.state.timerWidget = this.jobRow(running, top, {
+          subtitle: formatElapsed(running.start),
+          icon: STOP_ICON,
+          color: this.state.acting ? COLORS.accentPressed : COLORS.accent,
+          pressed: COLORS.accentPressed,
+          labelColor: COLORS.onAccent,
+          subtitleColor: COLORS.onAccentMuted,
+          onClick: () => this.stop()
+        })
+        this.state.interval = setInterval(() => {
+          if (this.state.timerWidget) {
+            this.state.timerWidget.setProperty(hmUI.prop.TEXT, formatElapsed(running.start))
+          }
+        }, 1000)
+        top += ROW_PITCH + DAY_GAP
+      }
 
       if (presets.length === 0) {
+        if (running) return
         this.panel(90, 120, COLORS.surface)
         this.text('Nothing tracked yet', 118, 34, 24, COLORS.text)
         this.text('Start one from Toggl first', 152, 28, 18, COLORS.muted)
@@ -455,8 +459,8 @@ Page(
       // day's recordings are already contiguous; a day with nothing tracked
       // simply never comes up. Rows with no usable start — the
       // configured-default fallback — draw ungrouped.
-      const { steps } = this.planList(presets, LIST_TOP)
-      this.drawList(steps, (preset) => this.start(preset))
+      const { steps } = this.planList(presets, top)
+      this.drawList(steps, (preset) => (running ? this.switchTo(running, preset) : this.start(preset)))
     },
 
     /**
@@ -492,6 +496,20 @@ Page(
       return Math.max(SCREEN.height, bottom + LIST_BOTTOM_PAD)
     },
 
+    /**
+     * Switches the running entry to another job. The history now includes the
+     * running job's own past recordings, so a tap can name what is already
+     * running — which Toggl would accept and nothing would change, at the cost
+     * of a request from an allowance worth guarding.
+     */
+    switchTo(running, preset) {
+      const same =
+        String(preset.workspaceId) === String(running.workspaceId) &&
+        String(preset.projectId || 0) === String(running.projectId || 0) &&
+        preset.description === running.description
+      if (same) return
+      this.applyEdit(running, preset)
+    },
     applyEdit(running, preset) {
       this.run(
         {

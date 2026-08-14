@@ -150,6 +150,7 @@ export const SCENARIOS = [
           start: RUNNING_START
         },
         presets: [
+          { description: 'Deep work', label: 'Deep work', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: daysAgoAt(0, 7), duration: 3600 },
           { description: 'Client call', label: 'Client call', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: daysAgoAt(1, 15), duration: 2700 },
           { description: 'Invoicing', label: 'Invoicing', projectName: 'Admin', projectId: 22, workspaceId: 10, start: daysAgoAt(3, 11), duration: 1500 }
         ]

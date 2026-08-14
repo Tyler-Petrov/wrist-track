@@ -364,7 +364,7 @@ test('stopping costs one request and records the finished run on top', async () 
   assert.equal(after.presets.filter((p) => p.description === 'Deep work').length, 2)
 })
 
-test('starting asks Toggl first, then drops the job from the list locally', async () => {
+test('starting asks Toggl first, and leaves the history it already had', async () => {
   const { send, calls } = await setup()
   await send('GET_STATUS')
 
@@ -373,7 +373,33 @@ test('starting asks Toggl first, then drops the job from the list locally', asyn
 
   assert.deepEqual(calls, ['GET /me/time_entries/current', 'POST /workspaces/10/time_entries'])
   assert.equal(after.running.description, 'Deep work')
-  assert.deepEqual(after.presets.map((p) => p.description), ['Client call'], 'no re-read of the recent list')
+  // The history is a record of what ran, so starting a job does not remove
+  // its earlier recordings from it — and no re-read pays for saying so.
+  assert.deepEqual(after.presets.map((p) => p.description), ['Deep work', 'Client call'])
+})
+
+/**
+ * Somebody who tracks one job all month has a history made entirely of that
+ * job. Filtering the running job out of the list emptied the screen the moment
+ * they started it, which is what the device showed.
+ */
+test('a history of nothing but the running job still reaches the watch', async () => {
+  const onlyJob = [
+    { id: 1, description: 'Jairus', project_id: 20, workspace_id: 10, duration: 10980, project_name: 'WristTrack', start: '2026-07-30T09:00:00+00:00' },
+    { id: 2, description: 'Jairus', project_id: 20, workspace_id: 10, duration: 21300, project_name: 'WristTrack', start: '2026-07-29T09:00:00+00:00' }
+  ]
+  const { send } = await setup({
+    current: runningEntry({ description: 'Jairus' }),
+    recent: onlyJob
+  })
+
+  const status = await send('GET_STATUS')
+  assert.equal(status.running.description, 'Jairus')
+  assert.deepEqual(
+    status.presets.map((p) => p.description),
+    ['Jairus', 'Jairus'],
+    'the past recordings of the running job are still history'
+  )
 })
 
 /**
@@ -398,19 +424,14 @@ test('starting is refused when Toggl has a timer the cache has not seen yet', as
 })
 
 /**
- * The running job is kept out of the list it could be switched to, but that
- * removal used to be written back to the cache — so each job that ran was lost
- * from the list permanently, and re-labelling away from one did not bring it
- * back. Over a session between recent-list reads the list thinned out.
+ * Re-labelling used to be written back to the cache as a removal, so each job
+ * that ran was lost from the list permanently and switching away from one did
+ * not bring it back. The list thinned out over a session.
  */
-test('re-labelling puts the job that was running back in the list', async () => {
+test('re-labelling leaves the history whole', async () => {
   const { send } = await setup({ current: runningEntry() })
   const before = await send('GET_STATUS')
-  assert.deepEqual(
-    before.presets.map((preset) => preset.description),
-    ['Client call'],
-    'the running job is not offered as something to switch to'
-  )
+  assert.deepEqual(before.presets.map((preset) => preset.description), ['Deep work', 'Client call'])
 
   const after = await send('UPDATE', {
     entryId: 4242,
@@ -422,10 +443,11 @@ test('re-labelling puts the job that was running back in the list', async () => 
     projectName: 'Home Maintenance'
   })
 
+  assert.equal(after.running.description, 'Client call', 'the running entry took the new label')
   assert.deepEqual(
     after.presets.map((preset) => preset.description),
-    ['Deep work'],
-    'switching to Client call should offer Deep work again, and stop offering Client call'
+    ['Deep work', 'Client call'],
+    'what already ran is unchanged by re-labelling what is running now'
   )
 })
 
@@ -438,13 +460,12 @@ test('the job list does not erode across polls', async () => {
     const polled = await send('GET_STATUS')
     assert.deepEqual(
       polled.presets.map((preset) => preset.description),
-      ['Client call'],
+      ['Deep work', 'Client call'],
       `the list changed on poll ${poll + 1}`
     )
   }
 
-  // Stopping restores the whole history: the run just finished on top, the
-  // earlier recording of the same job back where it was.
+  // Stopping adds the run that just finished on top of the ones before it.
   const stopped = await send('STOP', { entryId: 4242, workspaceId: 10 })
   assert.deepEqual(stopped.presets.map((preset) => preset.description), ['Deep work', 'Deep work', 'Client call'])
 })
