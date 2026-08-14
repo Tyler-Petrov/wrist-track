@@ -34,7 +34,8 @@ question. See [Staying in sync](#staying-in-sync) for why that matters.
 - Picks up timers started, stopped or re-labelled somewhere else — the Toggl
   phone app, the web app, the browser extension — usually within 15 seconds.
 - Starts and stops timers against Toggl Track API v9.
-- Offers your five most recent entries as one-tap presets, newest first.
+- Shows your past week of recordings as one-tap rows, newest first, each with
+  the day it ran and how long it took. Tap one to start that job again.
 - Re-labels a running timer in place: tap a job below the clock and the
   description and project change without resetting the elapsed time.
 - Handles an empty account, a rejected token, an offline phone and Toggl's
@@ -91,9 +92,13 @@ The Side Service holds the second cache, and meters what reaches Toggl:
 
 - **Reads are served from cache.** A status check inside a 12-second window
   costs nothing. Opening the app twice in a minute is one request, not four.
-- **The recent-jobs list has its own slow clock.** It is re-read every 30
-  minutes rather than on every check, which is what keeps a routine poll to a
-  single request — the one asking what is running.
+- **The week of history is cached for hours and re-read lazily.** It barely
+  moves on its own — the things that change it from the watch are stops and
+  re-labels, and those update the cached copy locally — so it is kept for six
+  hours, and a routine poll stays a single request: the one asking what is
+  running. When the copy does expire, it is served anyway and the re-read runs
+  in the background; the refreshed week arrives with a later poll instead of
+  making any glance wait.
 - **Background checks may spend only 18 of the 30.** The remaining 12 are held
   back so start and stop still work at the end of a long session. A screen left
   open backs off from 15-second to 60-second checks as the hour fills, then
@@ -101,9 +106,12 @@ The Side Service holds the second cache, and meters what reaches Toggl:
   afford. `test/cache.test.js` drives an hour of that schedule and asserts the
   reserve survives.
 - **Actions compute their own result.** Toggl has already confirmed a stop, so
-  the finished job is moved to the top of the list locally instead of re-reading
-  it. Stopping and re-labelling cost one request each, down from two and three;
-  starting costs two, down from three.
+  the finished run is written to the top of the history locally — its start is
+  known and its stop is now — instead of re-reading the week. Stopping and
+  re-labelling cost one request each, down from two and three; starting costs
+  two, down from three. A stop noticed from elsewhere gets the same local
+  write, plus a background re-read to catch anything else tracked away from
+  the watch.
 - **The job list is cached whole.** Keeping the running job out of it is done on
   the way to the watch, not in the cache. Written back, that removal would be
   permanent: every job that ran would drop out of the list until the next
@@ -114,16 +122,16 @@ The Side Service holds the second cache, and meters what reaches Toggl:
   more than the request it would save.
 
 Measured against about thirty ten-second glances a day, which is the pattern
-this is tuned for, that comes to **63 requests across the whole day**, and a
+this is tuned for, that comes to **36 requests across the whole day**, and a
 heavy hour of ten glances spends **12 of the 18** allowed. `test/side-service.test.js`
 drives both of those against the real code.
 
-Worth being precise about where the win is: a glance half an hour after the last
-one finds every cache expired, so it costs the same two requests it always did.
-What the cache buys is that a second look inside the same glance is free, that
-actions cost less, and that clustered glances stop paying for the recent list
-each time. The limit being reached degrades into stale-but-labelled data rather
-than an error.
+Worth being precise about where the win is: a glance half an hour after the
+last one costs one request — the status check — because the week of history
+answers from its own long cache. What the cache buys is that a second look
+inside the same glance is free, that actions cost less, and that the history
+is re-read a handful of times a day instead of on a half-hour clock. The limit
+being reached degrades into stale-but-labelled data rather than an error.
 
 ---
 
@@ -199,8 +207,9 @@ black screen; see *A black screen after install* below.
 
 Open **WristTrack** from the watch's app list.
 
-- **Pick a job** — your recent entries as rows. Tap one to select it, then
-  **Start timer**. More than three shows a `‹ 2 of 5 ›` pager.
+- **This week** — your past week of recordings as rows, each saying when it
+  ran and for how long. Tap one to select it, then **Start timer** to run that
+  job again. More than three shows a `‹ 2 of 5 ›` pager.
 - **Running** — the pink card shows the live clock. The jobs below it are
   one-tap switches: tapping one re-labels the running entry without resetting
   the clock. Tap the card itself for the full list.
@@ -227,7 +236,7 @@ Your phone must be paired and online at the moment you press start or stop.
 | **Phone is offline or Toggl is unavailable.** | The phone lost its data connection, or Bluetooth to the watch dropped. |
 | **A timer is already running.** | Toggl already has a running entry. Refresh to pick it up. |
 | **Phone link is still starting.** | The watch app opened before the phone connection was ready. Press the button again. |
-| **Nothing tracked yet** | No entries in the last 30 days. Track something once, from Toggl or the watch. |
+| **Nothing tracked yet** | No entries in the last week. Track something once, from Toggl or the watch. |
 
 ## "Send package to device failed"
 

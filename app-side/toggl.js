@@ -55,7 +55,7 @@ export function asArray(value) {
   return value && Array.isArray(value.items) ? value.items : []
 }
 
-export const HISTORY_DAYS = 30
+export const HISTORY_DAYS = 7
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const isoDate = (ms) => new Date(ms).toISOString().slice(0, 10)
@@ -76,6 +76,78 @@ export function recentEntriesPath(now = Date.now(), days = HISTORY_DAYS) {
 
 const NO_PROJECT = 'No project'
 const NO_DESCRIPTION = 'No description'
+
+/**
+ * Toggl returns RFC 3339 stamps such as `2026-07-30T12:04:09+00:00`. The
+ * page's copy of this parser exists because QuickJS on the watch does not
+ * reliably parse every offset form; the Side Service shares the caution.
+ */
+export function parseStart(value) {
+  const text = String(value || '')
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/)
+  if (!match) {
+    const fallback = new Date(text).getTime()
+    return Number.isNaN(fallback) ? null : fallback
+  }
+
+  const utc = Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+    Number(match[6])
+  )
+  const zone = match[7]
+  if (!zone || zone === 'Z') return utc
+
+  const sign = zone[0] === '-' ? 1 : -1
+  const hours = Number(zone.slice(1, 3))
+  const minutes = Number(zone.replace(':', '').slice(3, 5))
+  return utc + sign * (hours * 60 + minutes) * 60000
+}
+
+/** "45m", "1h 20m", "2h" — a wrist-sized duration. */
+export function formatDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0))
+  const minutes = Math.round(total / 60)
+  if (minutes < 60) return `${Math.max(1, minutes)}m`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest ? `${hours}h ${rest}m` : `${hours}h`
+}
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/**
+ * Which day a recording belongs to, in the phone's local time. The list only
+ * reaches a week back, so a weekday name is never ambiguous for long.
+ */
+export function dayLabel(startMs, now = Date.now()) {
+  const start = new Date(startMs)
+  const midnight = new Date(now)
+  midnight.setHours(0, 0, 0, 0)
+  if (startMs >= midnight.getTime()) return 'Today'
+  if (startMs >= midnight.getTime() - DAY_MS) return 'Yesterday'
+  return WEEKDAYS[start.getDay()]
+}
+
+/**
+ * The second line of a history row: when it ran and for how long, plus the
+ * project when the first line is the description. When the entry is
+ * project-only the project already is the first line, so it is not repeated.
+ */
+export function historySubtitle({ description, projectName, start, duration }, now = Date.now()) {
+  const startMs = parseStart(start)
+  if (startMs === null || !(Number(duration) > 0)) {
+    return presetSubtitle(description, projectName)
+  }
+  const when = `${dayLabel(startMs, now)} · ${formatDuration(duration)}`
+  if (description && projectName && projectName !== NO_PROJECT) {
+    return `${when} · ${projectName}`
+  }
+  return when
+}
 
 /**
  * Toggl entries very often have no description — the project alone is the
@@ -167,48 +239,44 @@ export function reduceAccount(me) {
   }
 }
 
-export const PRESET_LIMIT = 5
+export const HISTORY_LIMIT = 20
 
 /**
- * The watch offers the five most recent distinct entries, newest first. Toggl
- * returns /me/time_entries newest first already. The configured default is
- * only used as a fallback when the account has no history to draw on, so a
- * fresh account still has something to start.
+ * The watch shows the past week of recordings, newest first, the way Toggl
+ * already returns /me/time_entries. Each row is one recording, duplicates and
+ * all — the list is a history, not a menu of distinct jobs — and tapping one
+ * starts that job again. The configured default is only used as a fallback
+ * when the account has no history to draw on, so a fresh account still has
+ * something to start.
  */
-export function buildPresets(entries, account, settings) {
+export function buildHistory(entries, account, settings, now = Date.now()) {
   const workspaceId = Number(settings.workspaceId || account.defaultWorkspaceId)
   const projectsById = Object.fromEntries(account.projects.map((project) => [project.id, project]))
 
-  const recent = asArray(entries)
-    // Skip deleted entries, and the running one: it is already on screen and
-    // offering it as something to switch to is meaningless.
+  const history = asArray(entries)
+    // Skip deleted entries, and the running one: it is on the card already,
+    // and its recording is not finished.
     .filter((entry) => !entry.server_deleted_at && !(Number(entry.duration) < 0))
     .map((entry) => {
       const projectId = entry.project_id || entry.pid || null
       const projectName =
         entry.project_name || (projectsById[projectId] && projectsById[projectId].name) || NO_PROJECT
       const description = String(entry.description || '').trim()
-      return {
+      const item = {
         description,
         label: presetLabel(description, projectName),
-        subtitle: presetSubtitle(description, projectName),
         projectId,
         projectName,
-        workspaceId: entry.workspace_id || entry.wid || workspaceId
+        workspaceId: entry.workspace_id || entry.wid || workspaceId,
+        start: entry.start,
+        duration: Number(entry.duration) || 0
       }
+      item.subtitle = historySubtitle(item, now)
+      return item
     })
+    .slice(0, HISTORY_LIMIT)
 
-  const seen = {}
-  const presets = recent
-    .filter((candidate) => {
-      const key = `${candidate.workspaceId}:${candidate.projectId || 0}:${candidate.description}`
-      if (seen[key]) return false
-      seen[key] = true
-      return true
-    })
-    .slice(0, PRESET_LIMIT)
-
-  if (presets.length > 0) return presets
+  if (history.length > 0) return history
 
   const defaultProject = projectsById[Number(settings.projectId)]
   const description = String(settings.description || 'Working').trim() || 'Working'

@@ -1,16 +1,26 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+
+// Day labels are computed in the phone's local time; pin it so the fixtures
+// below mean the same thing on every machine that runs the suite.
+process.env.TZ = 'UTC'
+
 import {
+  HISTORY_LIMIT,
   asArray,
   buildAuthHeader,
-  buildPresets,
+  buildHistory,
   createTogglClient,
   credentialTag,
+  dayLabel,
   encodeBase64,
   entrySummary,
+  formatDuration,
   friendlyError,
+  historySubtitle,
   makeStartPayload,
   parseBody,
+  parseStart,
   presetLabel,
   presetSubtitle,
   projectNamesFrom,
@@ -66,7 +76,7 @@ test('supports array and wrapped API responses', () => {
   assert.equal(parseBody({ body: '' }), null)
 })
 
-test('reduces account data and builds unique recent presets', () => {
+test('reduces account data and builds the week of recordings', () => {
   const account = reduceAccount({
     fullname: 'A User',
     default_workspace_id: 10,
@@ -78,27 +88,75 @@ test('reduces account data and builds unique recent presets', () => {
   })
   assert.equal(account.projects.length, 1)
 
-  const entry = (description) => ({ description, project_id: 20, workspace_id: 10 })
+  const entry = (description) => ({ description, project_id: 20, workspace_id: 10, duration: 600 })
   const settings = { description: 'Build', workspaceId: 10, projectId: 20 }
 
-  // Newest first, duplicates collapsed, and the configured default does not
-  // elbow its way to the front.
-  const presets = buildPresets([entry('Review'), entry('Review'), entry('Ship')], account, settings)
-  assert.deepEqual(presets.map((preset) => preset.description), ['Review', 'Ship'])
-  assert.equal(presets[0].projectName, 'App')
+  // Newest first, and each recording is its own row — the same job tracked
+  // twice this week is two entries of history, not a duplicate to collapse.
+  const history = buildHistory([entry('Review'), entry('Review'), entry('Ship')], account, settings)
+  assert.deepEqual(history.map((item) => item.description), ['Review', 'Review', 'Ship'])
+  assert.equal(history[0].projectName, 'App')
 
-  // Never more than five.
-  const many = buildPresets(
-    ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(entry),
+  // Bounded, so the payload crossing Bluetooth stays small.
+  const many = buildHistory(
+    Array.from({ length: HISTORY_LIMIT + 9 }, (_, index) => entry(`job-${index}`)),
     account,
     settings
   )
-  assert.deepEqual(many.map((preset) => preset.description), ['a', 'b', 'c', 'd', 'e'])
+  assert.equal(many.length, HISTORY_LIMIT)
 
   // An account with no history still gets something to start.
-  const empty = buildPresets([], account, settings)
-  assert.deepEqual(empty.map((preset) => preset.description), ['Build'])
+  const empty = buildHistory([], account, settings)
+  assert.deepEqual(empty.map((item) => item.description), ['Build'])
   assert.equal(empty[0].projectName, 'App')
+})
+
+test('a recording row says when it ran and for how long', () => {
+  const now = Date.parse('2026-08-12T18:00:00Z')
+  const account = { projects: [], defaultWorkspaceId: 10 }
+  const history = buildHistory(
+    [
+      { description: 'Review', project_id: 20, project_name: 'App', workspace_id: 10, duration: 4800, start: '2026-08-12T09:00:00Z' },
+      { description: '', project_id: 20, project_name: 'App', workspace_id: 10, duration: 300, start: '2026-08-11T09:00:00Z' },
+      { description: 'Ship', workspace_id: 10, duration: 7200, start: '2026-08-07T09:00:00Z' }
+    ],
+    account,
+    {},
+    now
+  )
+
+  // With a description the project still gets named; without one the project
+  // is already the first line, so the second line does not repeat it.
+  assert.deepEqual(
+    history.map((item) => item.subtitle),
+    ['Today · 1h 20m · App', 'Yesterday · 5m', 'Fri · 2h']
+  )
+  assert.deepEqual(history.map((item) => item.label), ['Review', 'App', 'Ship'])
+  // The fields a re-start needs survive alongside the display ones.
+  assert.equal(history[0].start, '2026-08-12T09:00:00Z')
+  assert.equal(history[0].duration, 4800)
+})
+
+test('durations and days read at wrist size', () => {
+  assert.equal(formatDuration(30), '1m')
+  assert.equal(formatDuration(45 * 60), '45m')
+  assert.equal(formatDuration(3599), '1h')
+  assert.equal(formatDuration(80 * 60), '1h 20m')
+  assert.equal(formatDuration(2 * 3600), '2h')
+
+  const now = Date.parse('2026-08-12T18:00:00Z')
+  assert.equal(dayLabel(Date.parse('2026-08-12T01:00:00Z'), now), 'Today')
+  assert.equal(dayLabel(Date.parse('2026-08-11T23:00:00Z'), now), 'Yesterday')
+  assert.equal(dayLabel(Date.parse('2026-08-09T12:00:00Z'), now), 'Sun')
+
+  assert.equal(parseStart('2026-07-30T12:04:09+00:00'), Date.parse('2026-07-30T12:04:09Z'))
+  assert.equal(parseStart('2026-07-30T14:04:09+02:00'), Date.parse('2026-07-30T12:04:09Z'))
+  assert.equal(parseStart('not a date'), null)
+})
+
+test('a recording missing its stamps falls back to the old subtitle', () => {
+  assert.equal(historySubtitle({ description: 'Review', projectName: 'App' }), 'App')
+  assert.equal(historySubtitle({ description: '', projectName: 'App', start: 'garbage', duration: 60 }), 'No description')
 })
 
 test('only sends public timer fields to the watch', () => {
@@ -171,7 +229,7 @@ test('labels entries that have no description', () => {
   assert.equal(presetLabel('', 'No project'), 'No description')
 
   const account = { projects: [], defaultWorkspaceId: 10 }
-  const presets = buildPresets(
+  const history = buildHistory(
     [
       { description: '', project_id: 20, project_name: 'App', workspace_id: 10 },
       { description: '', project_id: null, workspace_id: 10 }
@@ -179,13 +237,13 @@ test('labels entries that have no description', () => {
     account,
     {}
   )
-  assert.deepEqual(presets.map((preset) => preset.label), ['App', 'No description'])
+  assert.deepEqual(history.map((item) => item.label), ['App', 'No description'])
   // The value sent to Toggl stays empty rather than inventing "Working".
-  assert.deepEqual(presets.map((preset) => preset.description), ['', ''])
+  assert.deepEqual(history.map((item) => item.description), ['', ''])
 
   // The second line never repeats the first.
-  assert.deepEqual(presets.map((preset) => preset.subtitle), ['No description', 'No project'])
-  presets.forEach((preset) => assert.notEqual(preset.label, preset.subtitle))
+  assert.deepEqual(history.map((item) => item.subtitle), ['No description', 'No project'])
+  history.forEach((item) => assert.notEqual(item.label, item.subtitle))
 })
 
 test('the card subtitle says what is missing rather than repeating the label', () => {
@@ -200,11 +258,15 @@ test('asks Toggl for an explicit history window with inline project names', () =
   assert.match(path, /start_date=2026-07-01/)
   // end_date is exclusive, so today's entries need tomorrow as the bound.
   assert.match(path, /end_date=2026-08-01/)
+
+  // The watch shows the past week, so that is what is asked for by default.
+  const week = recentEntriesPath(Date.parse('2026-07-31T06:00:00Z'))
+  assert.match(week, /start_date=2026-07-24/)
 })
 
-test('drops deleted and running entries from the preset list', () => {
+test('drops deleted and running entries from the history', () => {
   const account = { projects: [], defaultWorkspaceId: 10 }
-  const presets = buildPresets(
+  const history = buildHistory(
     [
       { description: 'Running now', duration: -1, workspace_id: 10 },
       { description: 'Deleted', duration: 60, workspace_id: 10, server_deleted_at: '2026-07-30T00:00:00Z' },
@@ -213,5 +275,5 @@ test('drops deleted and running entries from the preset list', () => {
     account,
     {}
   )
-  assert.deepEqual(presets.map((preset) => preset.label), ['Keep'])
+  assert.deepEqual(history.map((item) => item.label), ['Keep'])
 })

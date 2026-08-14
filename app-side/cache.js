@@ -1,6 +1,6 @@
 // Extension included deliberately: unlike the rest of app-side/, this module
 // is imported directly by the tests, so Node's ESM resolver has to find it.
-import { PRESET_LIMIT, entrySummary } from './toggl.js'
+import { HISTORY_LIMIT, entrySummary, historySubtitle, parseStart } from './toggl.js'
 
 /**
  * Toggl's Free plan allows 30 API requests per hour per user on a sliding
@@ -26,7 +26,15 @@ export const REFRESH_LIMIT = HOURLY_LIMIT - MUTATION_RESERVE
 
 /** Slightly under FAST_POLL_MS, so a poll arriving on time still refreshes. */
 export const STATUS_MAX_AGE = 12 * 1000
-export const PRESETS_MAX_AGE = 30 * 60 * 1000
+
+/**
+ * The week of history barely moves, and the actions that change it from the
+ * watch's side — stop, re-label — update the cached copy locally, so it can
+ * be old without being wrong. When it does expire it is re-read lazily: the
+ * cached copy is served immediately and the re-read happens in the
+ * background, so a status check never blocks on it.
+ */
+export const HISTORY_MAX_AGE = 6 * 60 * 60 * 1000
 
 export const FAST_POLL_MS = 15 * 1000
 export const SLOW_POLL_MS = 60 * 1000
@@ -85,7 +93,9 @@ export function statusSignature(status) {
   const head = running
     ? `${running.id}/${running.label}/${running.projectName}/${running.start}`
     : 'idle'
-  const presets = (status.presets || []).map(presetKey).join('|')
+  // The start stamp is part of the identity: two recordings of the same job
+  // are different rows, and a list that reordered has to redraw.
+  const presets = (status.presets || []).map((item) => `${presetKey(item)}@${item.start || ''}`).join('|')
   return `${head}#${presets}`
 }
 
@@ -98,12 +108,16 @@ export function withoutPreset(presets, preset) {
   return (presets || []).filter((item) => presetKey(item) !== key)
 }
 
-/** Moves a job to the front of the recent list, as Toggl itself would. */
-export function promotePreset(presets, preset) {
-  return [preset, ...withoutPreset(presets, preset)].slice(0, PRESET_LIMIT)
+/**
+ * Puts a recording that just finished at the top of the history. Earlier
+ * recordings of the same job stay put — they are history, not duplicates —
+ * which is exactly what a re-read from Toggl would say.
+ */
+export function promoteHistory(history, item) {
+  return [item, ...(history || [])].slice(0, HISTORY_LIMIT)
 }
 
-/** The running entry, in the shape the preset list uses. */
+/** The running entry, in the shape the history list uses for key matching. */
 export function entryAsPreset(running) {
   return {
     description: running.description,
@@ -113,6 +127,19 @@ export function entryAsPreset(running) {
     projectName: running.projectName,
     workspaceId: running.workspaceId
   }
+}
+
+/**
+ * A recording of the entry that was running, worked out locally: the start is
+ * known and the stop is now, so the row Toggl would eventually report can be
+ * written without re-reading the week from it.
+ */
+export function entryAsHistoryItem(running, now = Date.now()) {
+  const startMs = parseStart(running.start)
+  const duration = startMs === null ? 0 : Math.max(1, Math.round((now - startMs) / 1000))
+  const item = { ...entryAsPreset(running), start: running.start, duration }
+  item.subtitle = historySubtitle(item, now)
+  return item
 }
 
 /**

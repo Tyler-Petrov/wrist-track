@@ -294,6 +294,41 @@ test('a reply is written back, so the next launch has something to draw', async 
   )
 })
 
+/**
+ * The list the phone sends is a history: one row per recording, so the same
+ * job can appear several times with different days and durations. That is
+ * what the ready screen shows — but as switch targets, under the running card
+ * and on the edit screen, a second row for the same job adds nothing.
+ */
+test('the week of history draws one row per recording, duplicates included', async () => {
+  const twice = [
+    { description: 'Deep work', label: 'Deep work', subtitle: 'Today · 1h 20m · WristTrack', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'a' },
+    { description: 'Deep work', label: 'Deep work', subtitle: 'Mon · 2h · WristTrack', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'b' }
+  ]
+  const page = await makePage({ status: { ...SAVED, presets: twice } })
+  const labels = texts(await drawn(page))
+
+  assert.equal(labels.filter((text) => text === 'Deep work').length, 2, 'both recordings are rows')
+  assert.ok(labels.includes('Today · 1h 20m · WristTrack'))
+  assert.ok(labels.includes('Mon · 2h · WristTrack'))
+})
+
+test('under the running card each job is offered once, newest recording first', async () => {
+  const history = [
+    { description: 'Client call', label: 'Client call', subtitle: 'Today · 30m', projectId: 21, projectName: 'Home Maintenance', workspaceId: 10, start: 'a' },
+    { description: 'Client call', label: 'Client call', subtitle: 'Mon · 45m', projectId: 21, projectName: 'Home Maintenance', workspaceId: 10, start: 'b' },
+    { description: 'Invoicing', label: 'Invoicing', subtitle: 'Sun · 15m', projectId: 22, projectName: 'Admin', workspaceId: 10, start: 'c' }
+  ]
+  const page = await makePage({ status: { ...SAVED_RUNNING, presets: history } })
+  const labels = texts(await drawn(page))
+
+  assert.equal(labels.filter((text) => text === 'Client call').length, 1, 'the same job twice is one switch target')
+  assert.ok(labels.includes('Invoicing'), 'the freed slot goes to the next distinct job')
+
+  const distinct = page.distinctJobs(history)
+  assert.deepEqual(distinct.map((item) => item.start), ['a', 'c'], 'the newest recording of each job represents it')
+})
+
 test('polling stops once the app has been left alone', async () => {
   const page = await makePage({ status: SAVED })
   page.state.mounted = true

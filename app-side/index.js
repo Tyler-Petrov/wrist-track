@@ -1,7 +1,7 @@
 import { BaseSideService, settingsLib } from '@zeppos/zml/base-side'
 import {
   asArray,
-  buildPresets,
+  buildHistory,
   credentialTag,
   createTogglClient,
   friendlyError,
@@ -13,14 +13,15 @@ import {
   reduceAccount
 } from './toggl'
 import {
-  PRESETS_MAX_AGE,
+  HISTORY_MAX_AGE,
   STATUS_MAX_AGE,
   SLOW_POLL_MS,
+  entryAsHistoryItem,
   entryAsPreset,
   isFresh,
   nextPollDelay,
   projectNamesFromPresets,
-  promotePreset,
+  promoteHistory,
   recordSpend,
   refreshAllowance,
   relabelEntry,
@@ -36,6 +37,7 @@ const TOKEN_KEY = 'togglToken'
 const ACCOUNT_MAX_AGE = 6 * 60 * 60 * 1000
 const RESPONSE_TIMEOUT = 15 * 1000
 let mutationInFlight = null
+let historyReloadInFlight = false
 
 function readJson(key, fallback) {
   try {
@@ -199,9 +201,46 @@ async function fetchRecent(client, token, account) {
   const recent = await client.request(recentEntriesPath())
   assertCurrentToken(token)
   return {
-    presets: buildPresets(asArray(recent), account, getPreferences()),
+    presets: buildHistory(asArray(recent), account, getPreferences()),
     projectNames: projectNamesFrom(recent)
   }
+}
+
+/**
+ * Re-reads the week of history without making anybody wait for it. The cached
+ * copy has already been served; when this lands, the next poll picks up the
+ * new list by its changed signature. Fire-and-forget is safe here: a Side
+ * Service closed mid-read simply leaves the cached copy in place, and the
+ * next expiry tries again.
+ */
+function lazyReloadHistory(token) {
+  if (historyReloadInFlight) return
+  if (refreshAllowance(readSpend()) <= 0) return
+  historyReloadInFlight = true
+  ;(async () => {
+    const client = togglClient(token)
+    const account = await getAccount(token)
+    const fresh = await fetchRecent(client, token, account)
+    // Merge into whatever the cache says by now — a stop or start may have
+    // landed while the read was in flight, and this must not resurrect it.
+    const latest = readStatus(token)
+    if (!latest) return
+    settingsLib.setItem(
+      STATUS_KEY,
+      JSON.stringify({
+        ...latest,
+        presets: fresh.presets,
+        presetsAt: Date.now(),
+        // Fresh names win; ids the new week no longer mentions keep their
+        // old name rather than losing it.
+        projectNames: { ...cachedProjectNames(latest), ...fresh.projectNames }
+      })
+    )
+  })()
+    .catch(() => {})
+    .finally(() => {
+      historyReloadInFlight = false
+    })
 }
 
 /**
@@ -221,23 +260,32 @@ async function refreshStatus(token, cache) {
   const current = await client.request('/me/time_entries/current')
   assertCurrentToken(token)
 
-  // The recent list barely moves, so it is re-read on its own slow clock
-  // rather than on every poll — that is what keeps a refresh to one request.
-  // A timer stopping is the exception: the entry that just ended belongs at
-  // the top of the list.
+  // The week of history is re-read lazily, never on the poll's own clock —
+  // that is what keeps a refresh to one request. The cached copy is what is
+  // answered from; the re-read runs in the background when the copy has
+  // expired, and its result arrives with a later poll.
   const stoppedElsewhere = Boolean(cache && cache.running) && !(current && current.id)
-  const expired = !cache || !(cache.presets || []).length || !isFresh(cache.presetsAt, PRESETS_MAX_AGE)
-  const reread = expired || stoppedElsewhere
+  const empty = !cache || !(cache.presets || []).length
+  const expired = empty || !isFresh(cache.presetsAt, HISTORY_MAX_AGE)
 
   let presets = (cache && cache.presets) || []
   let presetsAt = (cache && cache.presetsAt) || 0
   let projectNames = cachedProjectNames(cache)
 
-  if (reread) {
+  if (empty) {
+    // Nothing cached to serve, so this once the read is worth waiting for.
     const fresh = await fetchRecent(client, token, account)
     presets = fresh.presets
     presetsAt = Date.now()
     projectNames = fresh.projectNames
+  } else if (stoppedElsewhere) {
+    // The entry that just ended is a recording the cached history lacks, and
+    // it is already fully known — write it locally, then let the background
+    // re-read pick up anything else tracked away from the watch.
+    presets = promoteHistory(presets, entryAsHistoryItem(cache.running))
+    lazyReloadHistory(token)
+  } else if (expired) {
+    lazyReloadHistory(token)
   }
 
   // The list is stored whole. Keeping the running job out of it is a
@@ -394,8 +442,8 @@ async function stopTimer(params) {
     })
     assertCurrentToken(token)
 
-    // The entry that just ended is the most recent thing tracked, so it goes
-    // to the front of the list locally rather than costing a re-read.
+    // The entry that just ended is the most recent recording, so it goes to
+    // the front of the history locally rather than costing a re-read.
     const stopped = cache && cache.running && cache.running.id === entryId ? cache.running : null
     if (!stopped) return getStatus({ force: true })
 
@@ -403,7 +451,7 @@ async function stopTimer(params) {
       writeStatus({
         ...cache,
         running: null,
-        presets: promotePreset(cache.presets, entryAsPreset(stopped))
+        presets: promoteHistory(cache.presets, entryAsHistoryItem(stopped))
       }),
       false
     )

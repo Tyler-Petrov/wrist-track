@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { register } from 'node:module'
-import { REFRESH_LIMIT, STATUS_MAX_AGE } from '../app-side/cache.js'
+import { HISTORY_MAX_AGE, REFRESH_LIMIT, STATUS_MAX_AGE } from '../app-side/cache.js'
 
 register('../tools/loader.mjs', import.meta.url)
 
@@ -20,8 +20,8 @@ const ME = {
 }
 
 const RECENT = [
-  { id: 1, description: 'Deep work', project_id: 20, workspace_id: 10, duration: 900, project_name: 'WristTrack' },
-  { id: 2, description: 'Client call', project_id: 21, workspace_id: 10, duration: 600, project_name: 'Home Maintenance' }
+  { id: 1, description: 'Deep work', project_id: 20, workspace_id: 10, duration: 900, project_name: 'WristTrack', start: '2026-07-30T09:00:00+00:00' },
+  { id: 2, description: 'Client call', project_id: 21, workspace_id: 10, duration: 600, project_name: 'Home Maintenance', start: '2026-07-29T15:00:00+00:00' }
 ]
 
 const runningEntry = (over = {}) => ({
@@ -109,6 +109,19 @@ function ageStatus(side, by) {
   cache.fetchedAt -= by
   side.writeSetting('togglStatus', JSON.stringify(cache))
 }
+
+/** Ages only the cached week of history, leaving the account cache alone. */
+function ageHistory(side, by) {
+  const cache = JSON.parse(side.readSetting('togglStatus'))
+  cache.presetsAt = Math.max(0, (cache.presetsAt || 0) - by)
+  side.writeSetting('togglStatus', JSON.stringify(cache))
+}
+
+/**
+ * Lets a background history re-read finish. The whole chain is promises with
+ * no timers in it, so one macrotask turn is enough for it to settle.
+ */
+const settle = () => new Promise((resolve) => setImmediate(resolve))
 
 /** Winds every stored timestamp back, so time appears to have passed. */
 function travel(side, by) {
@@ -198,7 +211,7 @@ test('the running project is still named on a poll that skips the recent list', 
   }
 })
 
-test('a timer stopped elsewhere is noticed, and re-reads the list it belongs in', async () => {
+test('a timer stopped elsewhere is recorded locally, then the week is re-read behind it', async () => {
   const { send, side, calls, state } = await setup({ current: runningEntry() })
 
   const running = await send('GET_STATUS')
@@ -212,7 +225,44 @@ test('a timer stopped elsewhere is noticed, and re-reads the list it belongs in'
 
   assert.equal(after.running, null, 'the watch must see the timer stop')
   assert.notEqual(after.signature, running.signature, 'the screen has to be told to redraw')
+  // The run that just ended is at the top of the history already, worked out
+  // locally from the entry the cache was holding — its start stamp proves the
+  // reply did not come from a re-read, which would not know entry 4242.
+  assert.equal(after.presets[0].description, 'Deep work')
+  assert.equal(after.presets[0].start, START)
+
+  // The re-read still happens — entries tracked entirely away from the watch
+  // are not inventable locally — but in the background, off the reply's path.
+  await settle()
   assert.deepEqual(calls, ['GET /me/time_entries/current', 'GET /me/time_entries'])
+})
+
+test('an expired history is served at once and re-read in the background', async () => {
+  const { send, side, calls, state } = await setup()
+  await send('GET_STATUS')
+
+  // An entry tracked from the phone hours ago, which the cache has not seen.
+  state.recent = [
+    { id: 9, description: 'Phone job', project_id: 21, workspace_id: 10, duration: 1200, project_name: 'Home Maintenance', start: '2026-07-30T12:00:00+00:00' },
+    ...RECENT
+  ]
+
+  ageStatus(side, STATUS_MAX_AGE + 1)
+  ageHistory(side, HISTORY_MAX_AGE + 1)
+  calls.length = 0
+  const served = await send('GET_STATUS')
+
+  // The reply did not wait for the re-read: it is the cached week, without
+  // the entry only a re-read would know about.
+  assert.deepEqual(served.presets.map((p) => p.description), ['Deep work', 'Client call'])
+
+  await settle()
+  assert.deepEqual(calls, ['GET /me/time_entries/current', 'GET /me/time_entries'], 'the whole exchange cost two requests')
+
+  // The next poll hands the watch the refreshed week.
+  ageStatus(side, STATUS_MAX_AGE + 1)
+  const next = await send('GET_STATUS')
+  assert.deepEqual(next.presets.map((p) => p.description), ['Phone job', 'Deep work', 'Client call'])
 })
 
 test('an exhausted allowance serves the cache instead of spending a request', async () => {
@@ -229,7 +279,7 @@ test('an exhausted allowance serves the cache instead of spending a request', as
   assert.equal(served.running.id, 4242)
 })
 
-test('stopping costs one request and puts the finished job back on the list', async () => {
+test('stopping costs one request and records the finished run on top', async () => {
   const { send, calls } = await setup({ current: runningEntry() })
   await send('GET_STATUS')
 
@@ -238,12 +288,10 @@ test('stopping costs one request and puts the finished job back on the list', as
 
   assert.deepEqual(calls, ['PATCH /workspaces/10/time_entries/4242/stop'])
   assert.equal(after.running, null)
-  assert.equal(after.presets[0].description, 'Deep work', 'the job just stopped leads the list')
-  assert.equal(
-    after.presets.filter((p) => p.description === 'Deep work').length,
-    1,
-    'it must not appear twice'
-  )
+  assert.equal(after.presets[0].description, 'Deep work', 'the run just finished leads the history')
+  // The earlier 'Deep work' recording stays put underneath: both runs really
+  // happened, and a history reports them both.
+  assert.equal(after.presets.filter((p) => p.description === 'Deep work').length, 2)
 })
 
 test('starting asks Toggl first, then drops the job from the list locally', async () => {
@@ -325,9 +373,10 @@ test('the job list does not erode across polls', async () => {
     )
   }
 
-  // Stopping restores the whole list, the finished job included.
+  // Stopping restores the whole history: the run just finished on top, the
+  // earlier recording of the same job back where it was.
   const stopped = await send('STOP', { entryId: 4242, workspaceId: 10 })
-  assert.deepEqual(stopped.presets.map((preset) => preset.description), ['Deep work', 'Client call'])
+  assert.deepEqual(stopped.presets.map((preset) => preset.description), ['Deep work', 'Deep work', 'Client call'])
 })
 
 test('re-labelling costs one request and does not reset the clock', async () => {
@@ -358,7 +407,7 @@ test('re-labelling costs one request and does not reset the clock', async () => 
  * opening the app costs — and that a second look inside the same glance is
  * free.
  */
-test('a day of thirty ten-second glances costs about two requests each', async () => {
+test('a day of thirty ten-second glances costs about one request each', async () => {
   const { send, side, calls } = await setup()
   let total = 0
   let worstGlance = 0
@@ -366,6 +415,7 @@ test('a day of thirty ten-second glances costs about two requests each', async (
   for (let glance = 0; glance < 30; glance += 1) {
     calls.length = 0
     await send('GET_STATUS') // opening the app
+    await settle() // let any background history re-read land and be counted
     const onOpen = calls.length
     await send('GET_STATUS') // a second look, seconds later
     assert.equal(calls.length, onOpen, 'a second look inside one glance must be free')
@@ -376,7 +426,9 @@ test('a day of thirty ten-second glances costs about two requests each', async (
   }
 
   assert.ok(worstGlance <= 3, `a glance cost ${worstGlance} requests`)
-  assert.ok(total <= 90, `a day of glances cost ${total} requests`)
+  // A glance costs the one request asking what is running; the account and
+  // the week of history each re-read a handful of times across the day.
+  assert.ok(total <= 45, `a day of glances cost ${total} requests`)
 })
 
 test('a burst of glances in one hour stays inside the refresh budget', async () => {

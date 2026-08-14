@@ -341,11 +341,27 @@ Page(
       this.primaryButton(action, PRIMARY_TOP, () => this.loadStatus())
     },
 
+    /**
+     * The history lists every recording, so the same job can appear many
+     * times. As something to switch to — under the running card and on the
+     * edit screen — a second row for the same job adds nothing, so only the
+     * newest recording of each is offered there.
+     */
+    distinctJobs(list) {
+      const seen = {}
+      return (list || []).filter((item) => {
+        const key = `${item.workspaceId}:${item.projectId || 0}:${item.description}`
+        if (seen[key]) return false
+        seen[key] = true
+        return true
+      })
+    },
+
     /** The live entry as a filled card, with the next jobs one tap away. */
     renderRunning(running) {
       // With nothing to switch to, the card grows into the space the job rows
       // would have used rather than leaving a void above STOP.
-      const others = (this.state.status.presets || []).slice(0, 2)
+      const others = this.distinctJobs(this.state.status.presets).slice(0, 2)
       const tall = others.length === 0
       const cardHeight = tall ? 216 : 132
 
@@ -414,7 +430,7 @@ Page(
       const window = this.visibleWindow(presets)
 
       const note = this.statusNote()
-      this.text(note ? `Pick a job · ${note.toLowerCase()}` : 'Pick a job', 30, 26, 18, COLORS.muted)
+      this.text(note ? `This week · ${note.toLowerCase()}` : 'This week', 30, 26, 18, COLORS.muted)
 
       if (presets.length === 0) {
         this.panel(90, 120, COLORS.surface)
@@ -481,9 +497,9 @@ Page(
       return presets.slice(first, first + VISIBLE_ROWS)
     },
 
-    /** Re-labels the running entry from the full recent list. */
+    /** Re-labels the running entry, offering each distinct recent job once. */
     renderEdit(running) {
-      const presets = this.state.status.presets || []
+      const presets = this.distinctJobs(this.state.status.presets)
       const window = this.visibleWindow(presets)
 
       this.text('Change to', 30, 26, 18, COLORS.accent)

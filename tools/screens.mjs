@@ -4,7 +4,10 @@
 import { register } from 'node:module'
 register('./loader.mjs', import.meta.url)
 
-const RUNNING_START = '2026-07-30T18:41:07+00:00'
+// Relative to now, so the elapsed clock reads 01:23:45 whenever the screens
+// are rendered. A fixed date here once aged past 100 hours, at which point
+// the clock grew a third digit and failed the HH:MM:SS layout check.
+const RUNNING_START = new Date(Date.now() - (1 * 3600 + 23 * 60 + 45) * 1000).toISOString()
 
 export const SCENARIOS = [
   {
@@ -45,8 +48,8 @@ export const SCENARIOS = [
           start: RUNNING_START
         },
         presets: [
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Admin', projectName: 'Admin', projectId: 22, workspaceId: 10 }
+          { description: 'Client call', label: 'Client call', subtitle: 'Yesterday · 45m · Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: '2026-07-29T15:00:00+00:00', duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Mon · 25m · Admin', projectName: 'Admin', projectId: 22, workspaceId: 10, start: '2026-07-27T11:00:00+00:00', duration: 1500 }
         ]
       },
       error: ''
@@ -61,16 +64,16 @@ export const SCENARIOS = [
   {
     name: '03-ready',
     title: 'Ready',
-    description: 'Connected, no timer running, several presets to page through.',
+    description: 'Connected, no timer running, the past week of recordings to page through.',
     state: {
       status: {
         configured: true,
         userName: 'Tyler Petrov',
         running: null,
         presets: [
-          { description: 'Deep work', label: 'Deep work', subtitle: 'WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10 },
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'No project', projectName: 'No project', projectId: null, workspaceId: 10 }
+          { description: 'Deep work', label: 'Deep work', subtitle: 'Today · 1h 20m · WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: '2026-07-30T09:00:00+00:00', duration: 4800 },
+          { description: 'Client call', label: 'Client call', subtitle: 'Yesterday · 45m · Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: '2026-07-29T15:00:00+00:00', duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Mon · 25m', projectName: 'No project', projectId: null, workspaceId: 10, start: '2026-07-27T11:00:00+00:00', duration: 1500 }
         ]
       },
       error: ''
@@ -78,7 +81,7 @@ export const SCENARIOS = [
   },
   {
     name: '04-ready-second-preset',
-    title: 'Ready, second preset',
+    title: 'Ready, second recording',
     description: 'After pressing the right arrow once.',
     state: {
       presetIndex: 1,
@@ -87,9 +90,9 @@ export const SCENARIOS = [
         userName: 'Tyler Petrov',
         running: null,
         presets: [
-          { description: 'Deep work', label: 'Deep work', subtitle: 'WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10 },
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'No project', projectName: 'No project', projectId: null, workspaceId: 10 }
+          { description: 'Deep work', label: 'Deep work', subtitle: 'Today · 1h 20m · WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: '2026-07-30T09:00:00+00:00', duration: 4800 },
+          { description: 'Client call', label: 'Client call', subtitle: 'Yesterday · 45m · Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: '2026-07-29T15:00:00+00:00', duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Mon · 25m', projectName: 'No project', projectId: null, workspaceId: 10, start: '2026-07-27T11:00:00+00:00', duration: 1500 }
         ]
       },
       error: ''
@@ -105,8 +108,8 @@ export const SCENARIOS = [
         userName: 'Tyler Petrov',
         running: null,
         presets: [
-          { description: '', label: 'Home Maintenance', subtitle: 'No description', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: '', label: 'No description', subtitle: 'No project', projectName: 'No project', projectId: null, workspaceId: 10 }
+          { description: '', label: 'Home Maintenance', subtitle: 'Today · 1h 5m', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: '2026-07-30T08:00:00+00:00', duration: 3900 },
+          { description: '', label: 'No description', subtitle: 'Tue · 20m', projectName: 'No project', projectId: null, workspaceId: 10, start: '2026-07-28T10:00:00+00:00', duration: 1200 }
         ]
       },
       error: ''
@@ -122,7 +125,7 @@ export const SCENARIOS = [
         configured: true,
         userName: 'Tyler Petrov',
         running: null,
-        presets: [{ description: 'Deep work', label: 'Deep work', subtitle: 'WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10 }]
+        presets: [{ description: 'Deep work', label: 'Deep work', subtitle: 'Today · 1h 20m · WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: '2026-07-30T09:00:00+00:00', duration: 4800 }]
       },
       error: ''
     }
@@ -146,8 +149,8 @@ export const SCENARIOS = [
           start: RUNNING_START
         },
         presets: [
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Admin', projectName: 'Admin', projectId: 22, workspaceId: 10 }
+          { description: 'Client call', label: 'Client call', subtitle: 'Yesterday · 45m · Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: '2026-07-29T15:00:00+00:00', duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Mon · 25m · Admin', projectName: 'Admin', projectId: 22, workspaceId: 10, start: '2026-07-27T11:00:00+00:00', duration: 1500 }
         ]
       },
       error: ''
@@ -173,8 +176,8 @@ export const SCENARIOS = [
           start: RUNNING_START
         },
         presets: [
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'No project', projectName: 'No project', projectId: null, workspaceId: 10 }
+          { description: 'Client call', label: 'Client call', subtitle: 'Yesterday · 45m · Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: '2026-07-29T15:00:00+00:00', duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Mon · 25m', projectName: 'No project', projectId: null, workspaceId: 10, start: '2026-07-27T11:00:00+00:00', duration: 1500 }
         ]
       },
       error: ''
@@ -200,8 +203,8 @@ export const SCENARIOS = [
           start: RUNNING_START
         },
         presets: [
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Admin', projectName: 'Admin', projectId: 22, workspaceId: 10 }
+          { description: 'Client call', label: 'Client call', subtitle: 'Yesterday · 45m · Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: '2026-07-29T15:00:00+00:00', duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Mon · 25m · Admin', projectName: 'Admin', projectId: 22, workspaceId: 10, start: '2026-07-27T11:00:00+00:00', duration: 1500 }
         ]
       },
       error: ''
@@ -230,8 +233,8 @@ export const SCENARIOS = [
           start: RUNNING_START
         },
         presets: [
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Admin', projectName: 'Admin', projectId: 22, workspaceId: 10 }
+          { description: 'Client call', label: 'Client call', subtitle: 'Yesterday · 45m · Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: '2026-07-29T15:00:00+00:00', duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Mon · 25m · Admin', projectName: 'Admin', projectId: 22, workspaceId: 10, start: '2026-07-27T11:00:00+00:00', duration: 1500 }
         ]
       },
       error: ''
