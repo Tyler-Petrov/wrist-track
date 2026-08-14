@@ -284,6 +284,57 @@ test('an expired history is served at once and re-read in the background', async
   assert.deepEqual(next.presets.map((p) => p.description), ['Phone job', 'Deep work', 'Client call'])
 })
 
+/**
+ * The background re-read is a snapshot taken when it started, not when it
+ * lands. If a stop writes its recording into the cache while that read is
+ * still in flight, the snapshot will not mention it — Toggl had not been
+ * told yet — and the merge has to notice that rather than paving over it.
+ */
+test('a stop landing mid-reload is not erased when the reload lands after it', async () => {
+  const { send, side, calls, state } = await setup({ current: runningEntry() })
+  await send('GET_STATUS')
+
+  // Hold the recent-entries read open so a stop can land while it is still
+  // in flight, the way a slow phone connection would.
+  const originalFetch = globalThis.fetch
+  let releaseRecent
+  const gate = new Promise((resolve) => {
+    releaseRecent = resolve
+  })
+  globalThis.fetch = async (request) => {
+    const path = String(request.url).replace(API, '').split('?')[0]
+    if (path === '/me/time_entries') await gate
+    return originalFetch(request)
+  }
+
+  ageStatus(side, STATUS_MAX_AGE + 1)
+  ageHistory(side, HISTORY_MAX_AGE + 1)
+  calls.length = 0
+
+  // The history is expired, not empty, so this is answered from cache at
+  // once and the re-read is kicked off behind it, unawaited.
+  const polled = await send('GET_STATUS')
+  assert.equal(polled.running.id, 4242)
+
+  // Elsewhere, the timer is stopped before that re-read comes back.
+  state.current = null
+  const stopped = await send('STOP', { entryId: 4242, workspaceId: 10 })
+  assert.equal(stopped.presets[0].start, START, 'the stop is recorded locally at once')
+
+  // Now the stale read — taken before the stop — lands.
+  releaseRecent()
+  await settle()
+
+  const after = await send('GET_STATUS')
+  assert.equal(
+    after.presets.filter((p) => p.start === START).length,
+    1,
+    'the recording made while the reload was in flight must survive it landing'
+  )
+
+  globalThis.fetch = originalFetch
+})
+
 test('an exhausted allowance serves the cache instead of spending a request', async () => {
   const { send, side, calls } = await setup({ current: runningEntry() })
   await send('GET_STATUS')

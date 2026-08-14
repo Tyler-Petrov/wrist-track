@@ -8,6 +8,7 @@ import {
   entryAsHistoryItem,
   entryAsPreset,
   isFresh,
+  mergeFreshHistory,
   nextAllowanceAt,
   nextPollDelay,
   presetKey,
@@ -171,6 +172,25 @@ test('promoting keeps earlier recordings of the same job, and respects the limit
 test('a running entry converts to a preset that can start it again', () => {
   const running = { id: 7, description: 'Deep work', label: 'Deep work', subtitle: 'WristTrack', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'x' }
   assert.deepEqual(entryAsPreset(running), preset())
+})
+
+test('a fresh re-read keeps the recording that beat it, and only that', () => {
+  const now = Date.parse('2026-08-12T12:00:00Z')
+  // Stopped seconds ago, while the re-read was in flight: Toggl's snapshot
+  // cannot mention it yet, so it must survive the merge.
+  const justStopped = preset({ start: '2026-08-12T11:30:00Z', duration: 1795 })
+  // Deleted in Toggl days ago: also absent from the fresh read, but ending
+  // long ago is what tells it apart — it must not resurrect.
+  const deleted = preset({ description: 'Deleted job', start: '2026-08-10T09:00:00Z', duration: 600 })
+  const fresh = [preset({ description: 'Client call', projectId: 21, start: '2026-08-12T10:00:00Z', duration: 900 })]
+
+  const merged = mergeFreshHistory([justStopped, deleted], fresh, now)
+  assert.deepEqual(merged.map((item) => item.description), ['Deep work', 'Client call'])
+
+  // When the fresh read does know the recording, its version wins — that is
+  // how a locally estimated duration gets corrected.
+  const corrected = mergeFreshHistory([justStopped], [{ ...justStopped, duration: 1800 }], now)
+  assert.deepEqual(corrected.map((item) => item.duration), [1800])
 })
 
 test('a stopped entry becomes a recording with its duration worked out locally', () => {

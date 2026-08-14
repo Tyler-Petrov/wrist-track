@@ -121,6 +121,35 @@ export function promoteHistory(history, item) {
   return [item, ...(history || [])].slice(0, HISTORY_LIMIT)
 }
 
+/**
+ * How recently a cached recording must have ended to survive a fresh re-read
+ * that does not mention it. The race this covers — a stop written locally
+ * while the re-read was in flight — is seconds wide, so minutes is generous.
+ */
+export const MERGE_GRACE_MS = 10 * 60 * 1000
+
+/**
+ * A background re-read can land after a stop already wrote its own recording
+ * into the cache — Toggl's snapshot was taken before that, so it may not
+ * mention it yet. Such a recording, matched by job and start since it carries
+ * no id, survives the merge rather than being silently overwritten. Only a
+ * recording that ended moments ago qualifies, though: a cached row that ended
+ * long ago and is absent from the fresh read was deleted in Toggl or aged out
+ * of the week, and keeping it would resurrect it at the top of the list.
+ */
+export function mergeFreshHistory(cachedHistory, freshHistory, now = Date.now()) {
+  const fresh = freshHistory || []
+  const known = new Set(fresh.map((item) => `${presetKey(item)}@${item.start || ''}`))
+  const kept = (cachedHistory || []).filter((item) => {
+    if (known.has(`${presetKey(item)}@${item.start || ''}`)) return false
+    const startMs = parseStart(item.start)
+    if (startMs === null) return false
+    const endedAt = startMs + Number(item.duration || 0) * 1000
+    return now - endedAt < MERGE_GRACE_MS
+  })
+  return [...kept, ...fresh].slice(0, HISTORY_LIMIT)
+}
+
 /** The running entry, in the shape the history list uses for key matching. */
 export function entryAsPreset(running) {
   return {

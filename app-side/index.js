@@ -19,6 +19,7 @@ import {
   entryAsHistoryItem,
   entryAsPreset,
   isFresh,
+  mergeFreshHistory,
   nextPollDelay,
   projectNamesFromPresets,
   promoteHistory,
@@ -222,14 +223,16 @@ function lazyReloadHistory(token) {
     const account = await getAccount(token)
     const fresh = await fetchRecent(client, token, account)
     // Merge into whatever the cache says by now — a stop or start may have
-    // landed while the read was in flight, and this must not resurrect it.
+    // landed while the read was in flight, and this must not resurrect the
+    // stale running state, nor drop a recording that landed after this read
+    // was taken but before it landed.
     const latest = readStatus(token)
     if (!latest) return
     settingsLib.setItem(
       STATUS_KEY,
       JSON.stringify({
         ...latest,
-        presets: fresh.presets,
+        presets: mergeFreshHistory(latest.presets, fresh.presets),
         presetsAt: Date.now(),
         // Fresh names win; ids the new week no longer mentions keep their
         // old name rather than losing it.
