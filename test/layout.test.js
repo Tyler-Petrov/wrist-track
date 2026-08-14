@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { SCENARIOS, loadPage, renderScenario } from '../tools/screens.mjs'
+import { SCENARIOS, renderScenario } from '../tools/screens.mjs'
 
 const PANEL = { width: 432, height: 514 }
 
@@ -13,17 +13,9 @@ function cornerInset(y) {
   return CORNER_RADIUS - Math.sqrt(CORNER_RADIUS * CORNER_RADIUS - (CORNER_RADIUS - distance) ** 2)
 }
 
-// Zeus bundles every .js file it finds for an es2015 target, so this file
-// stays clear of top-level await.
-let pageFactory = null
-const makePage = async (state) => {
-  if (!pageFactory) pageFactory = await loadPage()
-  return pageFactory(state)
-}
-
 for (const scenario of SCENARIOS) {
   test(`${scenario.title} renders inside the panel`, async () => {
-    const widgets = await renderScenario(makePage, scenario)
+    const widgets = await renderScenario(scenario)
     assert.ok(widgets.length > 1, 'screen drew nothing but the background')
 
     for (const item of widgets) {
@@ -40,9 +32,14 @@ for (const scenario of SCENARIOS) {
   })
 
   test(`${scenario.title} keeps content out of the rounded corners`, async () => {
-    const widgets = await renderScenario(makePage, scenario)
+    const widgets = await renderScenario(scenario)
     // The background fill is deliberately full-bleed.
     for (const item of widgets.filter((w) => w.w < PANEL.width)) {
+      // Rows of the list are exempt: the list runs the height of the panel so
+      // that recordings pass behind what is drawn over them, which means they
+      // pass through the corner zones on the way. What they must clear is the
+      // panel, which the check above holds them to.
+      if (item.parent) continue
       // On a scrolling screen anything at or past the bottom corner zone is
       // mid-list: it clips while passing through and clears once scrolled,
       // so only the resting top of the layout is held to the corner rule.
@@ -58,7 +55,7 @@ for (const scenario of SCENARIOS) {
   })
 
   test(`${scenario.title} gives every button an action`, async () => {
-    const widgets = await renderScenario(makePage, scenario)
+    const widgets = await renderScenario(scenario)
     for (const button of widgets.filter((w) => w.type === 'BUTTON')) {
       assert.equal(typeof button.click_func, 'function', `button ${button.text} has no click handler`)
       assert.ok(button.h >= 40, `button ${button.text} is too small to tap (h=${button.h})`)
@@ -69,7 +66,7 @@ for (const scenario of SCENARIOS) {
 
 test('every screen offers a way forward', async () => {
   for (const scenario of SCENARIOS) {
-    const widgets = await renderScenario(makePage, scenario)
+    const widgets = await renderScenario(scenario)
     const buttons = widgets.filter((w) => w.type === 'BUTTON')
     // The pre-reply screens need no button: they resolve when the phone
     // answers, which it does or fails loudly.
@@ -79,7 +76,7 @@ test('every screen offers a way forward', async () => {
 })
 
 test('the running screen shows a live elapsed time, above the history', async () => {
-  const widgets = await renderScenario(makePage, SCENARIOS.find((s) => s.name === '06-running'))
+  const widgets = await renderScenario(SCENARIOS.find((s) => s.name === '06-running'))
   const clock = widgets.find((w) => /^\d+:\d{2}:\d{2}$/.test(String(w.text ?? '')))
   assert.ok(clock, 'no HH:MM:SS readout on the running screen')
 

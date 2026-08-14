@@ -65,6 +65,12 @@ export function clockLabel(ms) {
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
+/** A bare calendar date in local time: "Jul 24", "Aug 9". */
+export function dateLabel(ms) {
+  const at = new Date(ms)
+  return `${MONTHS[at.getMonth()]} ${at.getDate()}`
+}
+
 /**
  * Which day a recording belongs to, in local time. Inside the past week a
  * weekday name reads naturally and cannot repeat; the list reaches a month
@@ -77,7 +83,29 @@ export function dayLabel(startMs, now = Date.now()) {
   if (startMs >= midnight.getTime()) return 'Today'
   if (startMs >= midnight.getTime() - DAY_MS) return 'Yesterday'
   if (startMs >= midnight.getTime() - 6 * DAY_MS) return WEEKDAYS[start.getDay()]
-  return `${MONTHS[start.getMonth()]} ${start.getDate()}`
+  return dateLabel(startMs)
+}
+
+/**
+ * How old the watch's own copy of the last screen may be before a *running*
+ * timer inside it stops being worth believing. The elapsed clock is computed
+ * from the start time, so it is right for as long as the timer really is going
+ * — the risk is the claim itself, on an entry stopped from the phone days ago.
+ *
+ * Both screens that read that copy apply this same limit: the home screen
+ * refuses to draw an old "Running", and the week's totals refuse to add its
+ * elapsed time, which would otherwise quietly inflate a number.
+ */
+export const RUNNING_TRUST_MS = 60 * 60 * 1000
+
+/**
+ * Whether a copy saved at `savedAt` may still claim a timer is running. A
+ * missing, negative or absurd age means the watch clock moved under us, which
+ * counts as no evidence of freshness at all.
+ */
+export function trustRunning(savedAt, now = Date.now()) {
+  const age = now - Number(savedAt)
+  return Number.isFinite(age) && age >= 0 && age < RUNNING_TRUST_MS
 }
 
 /**

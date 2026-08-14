@@ -39,6 +39,13 @@ question. See [Staying in sync](#staying-in-sync) for why that matters.
   it ran over and for how long. Tap a recording to start that job again.
 - Re-labels a running timer in place: tap a recording below the live row and
   the description and project change without resetting the elapsed time.
+- Reports on a second tab, a swipe to the left: a card each for the calendar
+  week, today, and the payroll cycle in progress, with the cycle just finished
+  joining them for a week after it closes. Each card has its own total and its
+  own breakdown by project, all counted from the history already on the watch,
+  so they cost no request at all. The two tabs are one page rather than two
+  pages, so there is no navigation between them, and two dots at the foot of
+  the panel say which one you are on.
 - Handles an empty account, a rejected token, an offline phone and Toggl's
   hourly API limit, with a readable message for each.
 - No analytics, no ads, no developer-operated data collection.
@@ -218,8 +225,133 @@ Open **WristTrack** from the watch's app list.
   clock. Tap it to stop. The history stays on screen underneath, and tapping a
   row there re-labels the running entry to that job without resetting the
   clock.
+- **Report** — the second of two tabs, and a card per stretch of time: the
+  calendar week, today, the payroll cycle in progress, and the one before it for
+  a week after it closes. Each says its own total, then a line per project with a
+  bar showing how it compares to that card's longest, and each grows to hold as
+  many projects as the stretch had. Swipe left for it and right to come back,
+  or tap the bar at the foot of either tab, whose two dots say which one you are
+  on.
 
 Your phone must be paired and online at the moment you press start or stop.
+
+## Why the month is a list widget
+
+Every widget costs a call out of the JS engine, and a month drawn row by row was
+about a hundred and forty of them: a background, a heading per day, and four
+widgets for each recording. That is seconds to put on screen, seconds more to
+take down, and it is why changing tabs felt broken rather than slow.
+
+The month is a single `SCROLL_LIST` now. The firmware is given a template per
+kind of row — one for a recording, one for a day heading — and an array of the
+words to put in them, and it fills and recycles the rows itself, natively. The
+page draws six widgets whether the month holds three recordings or fifty.
+
+Two things follow from that. The list scrolls inside its own box rather than
+scrolling the page, so nothing else has to move. And the running entry is
+deliberately *not* a row of the list: its clock changes every second, a list is
+refreshed by handing the whole of it back, and that is far too much to spend on
+a second hand. It is drawn as ordinary widgets, which is also what lets it wear
+the accent.
+
+**A list draws over everything else, whatever order it was created in.** The
+watch showed that plainly: the live row and a floating tab pill, both created
+after the list, were buried under the recordings. So nothing can be laid over
+it, and the layout is built around it instead. The list is given exactly the
+part of the panel nothing else wants, and every edge it clips rows at is the
+edge of something solid:
+
+- With nothing running, the list starts at the top of the panel and the opening
+  line is its own first row, so it scrolls away with the recordings and there is
+  nothing above them to be cut off under.
+- With a timer running, that line labels the live row and both are pinned, and
+  the list starts at the live row's foot: a recording scrolling out of sight
+  passes under a solid edge rather than vanishing in clear air.
+- At the bottom the tab dots sit in a bar the width of the panel, and the list
+  stops where the bar starts. The bar is also the tap target, which is a far
+  easier one than two dots.
+
+The week tab fits the panel on purpose, for the same reason: the longest few
+projects get a row each and the rest are added together into a last row, so the
+rows still sum to the total above them.
+
+## How the two tabs are built
+
+They are one page that draws one of two screens, not two pages. Both decisions
+below were got wrong first, so the evidence is worth keeping.
+
+**Switching must not navigate.** A second page and `push()` animates a
+transition, keeps a back stack, and runs a second copy of the state. Zepp OS
+does have a pager of its own, `SCROLL_MODE_SWIPER_HORIZONTAL`, which lays a page
+out as screen-wide items and flips between them; it reports itself as set
+(`setScrollMode` returns true, `getSwiperIndex` answers), but on the watch no
+swipe ever reached it. It also claims the page's one scroll axis, which the
+month of recordings needs for itself. So a tab change is a redraw: `onGesture`
+takes the sideways swipe, the other screen is drawn, and `scrollTo({ y: 0 })`
+puts it at the top. There is no transition because nothing is navigated to.
+
+Only the swipes with somewhere to go are consumed. A right swipe on the month is
+the system's own way out of the app, and swallowing it would trap the wearer
+inside; vertical gestures are never touched, being the page scroll that reaches
+the rest of the month.
+
+**The dots must not scroll away.** They did, when they were widgets on a page
+that scrolls, and moving them by hand from a scroll callback did not work on the
+watch either. Now nothing on the page scrolls at all: the month is a list that
+scrolls inside itself, and the week fits the panel, so the bar they sit in stays
+put by standing still. `test/report.test.js` asserts that neither tab draws
+anything under the bar, along with which dot each tab lights, and that a swipe
+with nowhere to go is left to the system.
+
+## What the report counts
+
+The week is Sunday to Saturday in the watch's local time, not a rolling seven
+days, and today is midnight to midnight. A recording belongs whole to the
+stretch it *started* in — which is how Toggl's own reports group entries, so the
+two agree about a session that ran past midnight, and a timer left running
+overnight belongs to yesterday, which is what it is. A timer still running
+counts the time it has run so far, into both cards when it started today.
+
+The payroll cycles run from the 11th to the 25th, and from the 26th to the 10th
+of the month after. Every day belongs to exactly one of them and each ends where
+the next begins, so which cycle you are in is answered by the date alone: there
+is nothing to configure and nothing to keep in step. The cycle that just closed
+stays on the report for a week after it does, which is long enough to see what
+the pay arriving was for and short enough not to be in the way once the current
+one is the interesting question. Because the second cycle of a month ends on the
+10th of the next, its length is the calendar's business — thirteen days after a
+February, fifteen after a January — so the boundaries are stepped as dates
+rather than counted in milliseconds.
+
+Today is inside this week by definition, so its figure is never the larger of the
+two, and a stretch with nothing in it says so on its own card. Nothing at all in
+range says it once rather than four times over.
+
+One limit worth knowing: the watch holds the past month, capped at fifty
+recordings. A week is never near that, but a payroll cycle is half a month, so a
+busy one can in principle reach back past the oldest recording the watch still
+has. The figure is a report on what the watch holds, not an audit of the Toggl
+account.
+
+Each card is as tall as what is in it: every project of that stretch gets a
+line, so the lines always sum to the figure above them and nothing is quietly
+left out. When the two cards come to more than the panel the tab scrolls, and
+the bar with the dots comes along at the end of the content rather than hanging
+over the middle of a card. The month tab never scrolls that way — what is long
+about it is the list, and a list scrolls inside its own box.
+
+Nothing is asked of the phone or of Toggl to produce it. Being tabs of one page,
+the week counts the very list the month tab draws, out of the same reply held in
+the same state, so the report is free, it works with the phone out of range, it
+cannot spend a request that stopping a timer might need, and the two tabs cannot
+disagree. The only thing that limits it is what the watch holds: the past month,
+capped at fifty recordings, which a single week would have to be extraordinary
+to exhaust.
+
+That shared list is also where the hour-old rule reaches it. A restored screen
+only keeps its running timer if it is under an hour old, so a timer stopped from
+the phone on Monday is gone from the month tab and adding nothing to the week's
+total either.
 
 ---
 
@@ -241,6 +373,8 @@ Your phone must be paired and online at the moment you press start or stop.
 | **A timer is already running.** | Toggl already has a running entry. Refresh to pick it up. |
 | **Phone link is still starting.** | The watch app opened before the phone connection was ready. Press the button again. |
 | **Nothing tracked yet** | No entries in the last month. Track something once, from Toggl or the watch. |
+| **Nothing tracked** on the week tab | The month has recordings, but none since Sunday. |
+| **Nothing synced yet** on the week tab | Nothing has arrived to count yet. The month tab next door is showing the spinner or an error for the same reason. |
 
 ## "Send package to device failed"
 
@@ -305,8 +439,12 @@ day of glances and a busy hour against the budget. `test/page.test.js` covers
 the watch-side copy — that a launch draws it rather than the spinner, that a
 three-day-old running timer is withheld while a three-day-old job list is not,
 that a corrupt one falls back safely, and that polling stops when the app is
-left alone. `test/layout.test.js` runs
-the real `page/home` code against stubbed Zepp modules and asserts every screen
+left alone. `test/report.test.js` covers the week: where the calendar week
+starts and ends, that a recording counts against the week it began in, that the
+running timer is included and keeps up without a redraw, which payroll cycle a
+given day falls in and how the cycles step through short months, and how the two
+tabs are wired. `test/layout.test.js` runs
+the real page code against stubbed Zepp modules and asserts every screen
 stays inside the panel, clears the rounded corners, and gives each button a
 handler — it has already caught a button clipped by the corner radius that would
 otherwise have shipped.
@@ -341,7 +479,7 @@ on hardware.
 ## Screens
 
 `docs/screens/` is regenerated by `npm run screens`, which runs the real page
-module against stub Zepp modules and rasterises the resulting widget tree at
+modules against stub Zepp modules and rasterises the resulting widget tree at
 432×514. The current design was chosen from a gallery of ten directions, each
 drawn from the same primitives Zepp OS actually provides.
 

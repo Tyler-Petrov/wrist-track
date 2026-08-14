@@ -1,7 +1,7 @@
 # WristTrack watch screens
 
 Rendered at the Amazfit Bip Max panel size (432x514) from the widget
-tree that `page/home/index.page.js` produces. Regenerate with `npm run screens`.
+tree the page modules produce. Regenerate with `npm run screens`.
 
 - **Syncing** — The very first launch only, before the watch has ever saved a screen. After that, opening the app draws the saved one instead. (`01-syncing.png`)
 - **Syncing, with the reason** — When the watch had nothing to draw, the spinner says why — so a storage failure, which would otherwise look exactly like a first launch, is visible without attaching the developer bridge. (`01c-syncing-reason.png`)
@@ -15,3 +15,6 @@ tree that `page/home/index.page.js` produces. Regenerate with `npm run screens`.
 - **Running, sync paused** — Toggl's hourly request allowance is spent, so the phone is serving its last known state. The clock keeps ticking, which is why the screen says so. (`07b-running-stale.png`)
 - **Can't sync** — The phone answered with a failure, here an expired token. (`08-error.png`)
 - **Offline** — The phone could not reach Toggl. (`09-error-offline.png`)
+- **Report** — The second tab, one swipe left of the month: two cards, the calendar week Sunday to Saturday and then today, each with its own total and its own breakdown by project. They count the very list the first tab is drawing, so they cost no request, and the timer still running is counted into both. (`10-report.png`)
+- **Report, a busy week** — Rendered whole rather than a panel at a time, to show what scrolling reaches: the cards are as tall as what is in them, so a week spread over more projects makes a longer report, and the tab bar comes along at the end of it. (`12-report-busy.png`)
+- **Report, nothing tracked** — Nothing inside any of the stretches the report totals, which it says once rather than four times over. The month tab next door may still have plenty in it. (`11-report-empty.png`)

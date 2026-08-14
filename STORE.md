@@ -12,7 +12,9 @@ Start and stop your Toggl Track timer from an Amazfit Bip Max.
 
 WristTrack puts the essential Toggl Track timer controls on your wrist. View
 the running entry, elapsed time, and project; stop it with one tap; or browse
-your past month of recordings and start any of them again.
+your past month of recordings and start any of them again. A second tab, one
+swipe to the left, totals the calendar week, today, and your payroll cycle, each
+broken down by project.
 
 The integration is serverless. Your paired phone communicates directly with
 Toggl Track over HTTPS, and your personal token is never sent to the watch or

@@ -1,5 +1,5 @@
-// Renders every watch screen to a PNG by replaying the widget tree that
-// page/home actually produces. Output goes to docs/screens/.
+// Renders every watch screen to a PNG by replaying the widget tree the page
+// modules actually produce. Output goes to docs/screens/.
 //
 // Usage: node tools/screenshots.mjs [outputDir]
 import { mkdir, rm, writeFile } from 'node:fs/promises'
@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { homedir } from 'node:os'
-import { SCENARIOS, loadPage, renderScenario } from './screens.mjs'
+import { SCENARIOS, renderScenario } from './screens.mjs'
 
 const run = promisify(execFile)
 
@@ -47,17 +47,26 @@ function widgetHtml(item) {
   const background = isButton ? `background:${hex(item.normal_color)};border-radius:${item.radius || 0}px;` : ''
   const wrap = item.text_style === 'WRAP'
   const weight = isButton || item.text_size >= 30 ? 600 : 500
-  return `<div style="position:absolute;${box};${background}display:flex;align-items:center;justify-content:center;
+  // Text sits where the widget says, not centred by default: a row's label is
+  // left-aligned and its duration right-aligned, and a render that centred
+  // both would flatter a layout the watch does not draw.
+  const justify = { LEFT: 'flex-start', RIGHT: 'flex-end' }[item.align_h] || 'center'
+  return `<div style="position:absolute;${box};${background}display:flex;align-items:center;justify-content:${justify};
     color:${hex(item.color)};font-size:${item.text_size}px;font-weight:${weight};line-height:1.24;
     text-align:center;padding:0 4px;box-sizing:border-box;
     ${wrap ? 'white-space:normal;' : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'}"
     >${escape(item.text)}</div>`
 }
 
-function pageHtml(widgets) {
+/**
+ * A screen that scrolls can be rendered whole, taller than the panel, so the
+ * documentation can show what scrolling down reaches. The watch still only
+ * ever shows a panel of it at a time.
+ */
+function pageHtml(widgets, height) {
   return `<!doctype html><meta charset="utf-8"><style>
     html,body{margin:0;padding:0;background:transparent}
-    #panel{position:relative;width:${PANEL.width}px;height:${PANEL.height}px;overflow:hidden;
+    #panel{position:relative;width:${PANEL.width}px;height:${height}px;overflow:hidden;
       border-radius:${PANEL.radius}px;background:#000;
       font-family:'Inter','Noto Sans','DejaVu Sans',system-ui,sans-serif;
       -webkit-font-smoothing:antialiased}
@@ -70,13 +79,15 @@ async function main() {
   await rm(OUT, { recursive: true, force: true })
   await mkdir(OUT, { recursive: true })
 
-  const makePage = await loadPage()
   const index = []
 
   for (const scenario of SCENARIOS) {
-    const widgets = await renderScenario(makePage, scenario)
+    const widgets = await renderScenario(scenario)
+    const height = scenario.tall
+      ? Math.max(PANEL.height, ...widgets.map((item) => item.y + item.h))
+      : PANEL.height
     const html = `${OUT}/${scenario.name}.html`
-    await writeFile(html, pageHtml(widgets))
+    await writeFile(html, pageHtml(widgets, height))
 
     await run(CHROME, [
       '--headless',
@@ -84,7 +95,7 @@ async function main() {
       '--hide-scrollbars',
       '--default-background-color=00000000',
       `--screenshot=${OUT}/${scenario.name}.png`,
-      `--window-size=${PANEL.width},${PANEL.height}`,
+      `--window-size=${PANEL.width},${height}`,
       `file://${process.cwd()}/${html}`
     ])
     await rm(html)
@@ -97,7 +108,7 @@ async function main() {
     `${OUT}/README.md`,
     `# WristTrack watch screens\n\n` +
       `Rendered at the Amazfit Bip Max panel size (${PANEL.width}x${PANEL.height}) from the widget\n` +
-      `tree that \`page/home/index.page.js\` produces. Regenerate with \`npm run screens\`.\n\n` +
+      `tree the page modules produce. Regenerate with \`npm run screens\`.\n\n` +
       `${index.join('\n')}\n`
   )
 }
