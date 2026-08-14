@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
-import { loadPage } from '../tools/screens.mjs'
+import { drawnWidgets, loadPage } from '../tools/screens.mjs'
 import { localStorage, resetStorage } from '../tools/stubs/storage.mjs'
 
 /**
@@ -59,12 +59,29 @@ const makePage = async (state) => {
   return pageFactory(state)
 }
 
+/** What the page drew, structure aside. */
 const drawn = async (page) => {
   const ui = await import('../tools/stubs/ui.mjs')
   ui.drain()
   page.render()
-  return ui.drain()
+  return drawnWidgets(ui.drain())
 }
+
+/**
+ * The month is one SCROLL_LIST widget: its data is every recording, in order,
+ * and only the rows that fit its box are drawn at any moment. Tests asking
+ * "is it all there" ask the data; tests asking "what does it look like" ask
+ * the rows the harness unrolled from it.
+ */
+const listOf = async (page) => {
+  const ui = await import('../tools/stubs/ui.mjs')
+  ui.drain()
+  page.render()
+  return ui.drain().filter((widget) => widget.type === 'SCROLL_LIST')[0]
+}
+
+/** The drawn recordings of the list, day headings aside. */
+const rowsOf = (widgets) => widgets.filter((widget) => widget.listType === 1)
 
 const texts = (widgets) => widgets.map((widget) => String(widget.text ?? ''))
 
@@ -263,11 +280,12 @@ test('the history stays on screen while a timer runs', async () => {
   assert.ok(labels.includes('Client call') && labels.includes('Invoicing'), 'and the history follows it')
   assert.ok(labels.includes('Today'), 'still grouped by day')
 
-  const rows = widgets.filter((widget) => widget.type === 'BUTTON')
-  assert.equal(rows.length, 3, 'the live entry plus every recording')
+  // The live row is drawn as widgets, so its clock can tick without the list
+  // being handed back whole; the recordings are rows of the list below it.
+  const live = widgets.filter((widget) => widget.type === 'BUTTON')[0]
+  assert.equal(rowsOf(widgets).length, 2, 'both recordings are rows')
 
-  // The live row stops the timer; the rows below switch it without a restart.
-  rows[0].click_func()
+  live.click_func()
   assert.equal(sent[0].method, 'STOP')
 
   const fresh = await makePage({ status: { ...SAVED_RUNNING, presets: history } })
@@ -276,8 +294,8 @@ test('the history stays on screen while a timer runs', async () => {
     switches.push(payload)
     return new Promise(() => {})
   }
-  const freshRows = (await drawn(fresh)).filter((widget) => widget.type === 'BUTTON')
-  freshRows[1].click_func()
+  const freshRows = rowsOf(await drawn(fresh))
+  freshRows[0].click_func()
   assert.equal(switches[0].method, 'UPDATE', 'a history row re-labels rather than starting a second timer')
   assert.equal(switches[0].params.entryId, SAVED_RUNNING.running.id)
   assert.equal(switches[0].params.description, 'Client call')
@@ -302,23 +320,23 @@ test('tapping a recording of the job already running does nothing', async () => 
     return new Promise(() => {})
   }
 
-  const rows = (await drawn(page)).filter((widget) => widget.type === 'BUTTON')
-  rows[1].click_func()
+  const widgets = await drawn(page)
+  rowsOf(widgets)[0].click_func()
   assert.deepEqual(sent, [], 'switching a job to itself is not worth a request')
 
   // The live row above it still stops, so the screen is not inert.
-  rows[0].click_func()
+  widgets.filter((widget) => widget.type === 'BUTTON')[0].click_func()
   assert.equal(sent[0].method, 'STOP')
 })
 
 test('the running row wears the accent, and its mark reads against it', async () => {
   const page = await makePage({ status: SAVED_RUNNING })
   const widgets = await drawn(page)
-  const rows = widgets.filter((widget) => widget.type === 'BUTTON')
-
   // The live row keeps the colour the old card had; the rest stay tonal.
-  assert.equal(rows[0].normal_color, 0xe57cd8, 'the running row is the accent pink')
-  rows.slice(1).forEach((row) => assert.equal(row.normal_color, 0x3d1c4c, 'the history rows are not'))
+  const live = widgets.filter((widget) => widget.type === 'BUTTON')[0]
+  assert.equal(live.normal_color, 0xe57cd8, 'the running row is the accent pink')
+  rowsOf(widgets)
+    .forEach((row) => assert.equal(row.color, 0x3d1c4c, 'the history rows are not'))
 
   // Hours are not padded to two digits: a timer left running for days reads
   // 372:18:53, which is still the clock.
@@ -390,27 +408,32 @@ test('a reply is written back, so the next launch has something to draw', async 
  * job can appear several times with different days and durations, and every
  * one of them is drawn.
  */
-test('every recording is drawn as a row; the page scrolls instead of paging', async () => {
-  const week = Array.from({ length: 8 }, (_, index) => ({
-    description: `Job ${index}`,
-    label: `Job ${index}`,
-    subtitle: 'Mon · 9:00-10:00 · 1h',
-    projectId: 20,
-    projectName: 'WristTrack',
-    workspaceId: 10,
-    start: `s${index}`
-  }))
-  const page = await makePage({ status: { ...SAVED, presets: week } })
-  const widgets = await drawn(page)
-  const labels = texts(widgets)
+/**
+ * Drawn row by row, a month was a hundred and forty widgets to create and as
+ * many to delete, and every one of them is a call out of the JS engine: the
+ * screen took seconds to appear and seconds to change. The list is one widget
+ * the firmware fills and recycles, so what the page holds no longer grows with
+ * the month.
+ */
+test('the month is one list widget, however many recordings it holds', async () => {
+  const month = Array.from({ length: 40 }, (_, index) => recording(`Job ${index}`, index % 20, 9 + (index % 2) * 5))
+  const page = await makePage({ status: { ...SAVED, presets: month } })
 
-  for (const item of week) {
-    assert.ok(labels.includes(item.label), `${item.label} should be a row, not behind a pager`)
+  const list = await listOf(page)
+  assert.ok(list, 'the recordings are a list, not a widget each')
+  assert.equal(list.data_count, list.data_array.length)
+  for (const item of month) {
+    assert.ok(
+      list.data_array.some((row) => row.label === item.label),
+      `${item.label} should be in the list's data`
+    )
   }
-  assert.ok(!labels.includes('‹') && !labels.includes('›'), 'the pager is gone')
+
+  const widgets = await drawn(page)
+  assert.ok(widgets.length < 30, `the page itself should stay small, drew ${widgets.length}`)
   assert.ok(
-    widgets.some((widget) => widget.y + widget.h > 514),
-    'the list is expected to run past the panel, which is what the page scroll reaches'
+    widgets.every((widget) => widget.y + widget.h <= 514),
+    'nothing runs past the panel: the list scrolls inside its own box'
   )
 })
 
@@ -485,10 +508,10 @@ test('the days stay newest first, while each day runs earliest to latest', async
       ]
     }
   })
-  const widgets = await drawn(page)
-  const order = widgets
-    .filter((widget) => /^(today|friday) (early|late)$/.test(String(widget.text ?? '')))
-    .map((widget) => widget.text)
+  const list = await listOf(page)
+  const order = list.data_array
+    .map((row) => row.label)
+    .filter((label) => /^(today|friday) (early|late)$/.test(label))
 
   assert.deepEqual(order, ['today early', 'today late', 'friday early', 'friday late'])
 })
@@ -512,26 +535,48 @@ test('a reply from an older build still groups and shows its times', async () =>
   assert.ok(!labels.includes('Yesterday · 3h 3m'), 'the old wording is not what gets drawn')
 })
 
-test('the background covers a list that scrolls past the panel', async () => {
-  const week = Array.from({ length: 10 }, (_, index) => recording(`Job ${index}`, index, 9))
-  const page = await makePage({ status: { ...SAVED, presets: week } })
-  const widgets = await drawn(page)
+/**
+ * A list draws over everything else whatever order it was created in, which
+ * the watch showed plainly: the live row and the tab bar were both buried
+ * under the recordings. So the list is given exactly the part of the panel
+ * nothing else wants, and each edge it clips rows at is the edge of something
+ * solid.
+ */
+test('the list takes the panel that nothing else is using', async () => {
+  const month = Array.from({ length: 10 }, (_, index) => recording(`Job ${index}`, index, 9))
+  const page = await makePage({ status: { ...SAVED, presets: month } })
+  const ui = await import('../tools/stubs/ui.mjs')
+  ui.drain()
+  page.render()
+  const idle = ui.drain()
 
-  const background = widgets[0]
-  const lowest = Math.max(...widgets.map((widget) => widget.y + widget.h))
+  const background = idle[0]
   assert.equal(background.type, 'FILL_RECT', 'the background is drawn first')
-  assert.ok(
-    background.h >= lowest,
-    `the background stops at ${background.h} with content reaching ${lowest}`
+  assert.equal(background.h, 514, 'one panel, since nothing on the page scrolls any more')
+
+  const list = idle.filter((widget) => widget.type === 'SCROLL_LIST')[0]
+  const bar = idle.filter((widget) => widget.type === 'BUTTON').pop()
+  assert.equal(list.y, 0, 'with nothing running, the list has the top of the panel')
+  assert.equal(list.y + list.h, bar.y, 'and stops exactly where the tab bar starts')
+
+  // The lead line is the list's first row, so it scrolls away with them.
+  assert.match(String(list.data_array[0].label), /This month/)
+  assert.equal(
+    idle.filter((widget) => /This month/.test(String(widget.text ?? '')) && !widget.parent).length,
+    0,
+    'nothing is pinned at the top for rows to be cut off under'
   )
 
-  // And the last row is not flush against the end of the scroll.
-  const rows = widgets.filter((widget) => widget.type === 'BUTTON')
-  const lastRow = rows[rows.length - 1]
-  assert.ok(
-    background.h - (lastRow.y + lastRow.h) >= 40,
-    'there should be padding below the last entry'
-  )
+  // With a timer running the live row is pinned, and the list starts at the
+  // foot of it: a recording scrolling out of sight goes under a solid edge.
+  const live = await makePage({ status: { ...SAVED_RUNNING, presets: month } })
+  ui.drain()
+  live.render()
+  const running = ui.drain()
+  const liveRow = running.filter((widget) => widget.type === 'BUTTON')[0]
+  const listBelow = running.filter((widget) => widget.type === 'SCROLL_LIST')[0]
+  assert.equal(listBelow.y, liveRow.y + liveRow.h, 'no gap for a row to be cut off in')
+  assert.equal(listBelow.y + listBelow.h, bar.y, 'and it still stops at the bar')
 })
 
 test('every recording carries a play mark, which is not a second control', async () => {
@@ -544,7 +589,7 @@ test('every recording carries a play mark, which is not a second control', async
   assert.equal(icons[0].click_func, undefined, 'the mark is decoration; the row takes the tap')
 
   // It sits at the right-hand end of the row, clear of the text.
-  const row = widgets.find((widget) => widget.type === 'BUTTON')
+  const row = rowsOf(widgets)[0]
   const label = widgets.find((widget) => widget.text === 'A')
   assert.ok(icons[0].x > label.x + label.w, 'the text stops before the mark')
   assert.ok(icons[0].x + icons[0].w <= row.x + row.w, 'and the mark stays inside the row')
@@ -558,8 +603,7 @@ test('tapping a recording starts that job', async () => {
     return new Promise(() => {})
   }
 
-  const widgets = await drawn(page)
-  const rows = widgets.filter((widget) => widget.type === 'BUTTON' && widget.text === '')
+  const rows = rowsOf(await drawn(page))
   assert.ok(rows.length >= 1, 'the recording should be drawn as a tappable row')
 
   rows[0].click_func()

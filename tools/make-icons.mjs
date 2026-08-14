@@ -9,7 +9,7 @@ import { writeFileSync } from 'node:fs'
 
 const SIZE = 26
 const SUPERSAMPLE = 4
-// From page/home/theme.js. Play sits on a tonal row, so it takes the accent
+// From page/theme.js. Play sits on a tonal row, so it takes the accent
 // pink; stop only ever sits on the accent-filled running row, so it takes the
 // dark ink that reads against it.
 const ACCENT = [0xe5, 0x7c, 0xd8]

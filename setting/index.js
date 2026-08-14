@@ -1,6 +1,6 @@
 const PROFILE_URL = 'https://track.toggl.com/profile'
 
-// Toggl Track's palette, same ground and mark the watch face uses (page/home/theme.js).
+// Toggl Track's palette, same ground and mark the watch face uses (page/theme.js).
 // The phone settings sheet is a light surface, so the pink is darkened for text
 // contrast and the full-strength pink is kept for the dark hero only.
 const COLORS = {

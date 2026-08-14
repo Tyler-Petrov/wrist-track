@@ -1,7 +1,10 @@
-// Renders every screen of the watch app by driving the real page module
+// Renders every screen of the watch app by driving the real page modules
 // against the stubs in tools/stubs, and hands back the widget tree each
 // screen produces.
 import { register } from 'node:module'
+// Imports nothing from @zos, so it needs no stub and can be loaded directly.
+import { weekStart } from '../shared/report.js'
+
 register('./loader.mjs', import.meta.url)
 
 // Relative to now, so the elapsed clock reads 01:23:45 whenever the screens
@@ -20,6 +23,38 @@ function daysAgoAt(days, hour, minute = 0) {
   when.setHours(hour, minute, 0, 0)
   return when.toISOString()
 }
+
+/**
+ * A recording `daysBack` before today, held inside the calendar week that is
+ * running now — so the report tab has both a week to total and a today to
+ * total, whichever day the screens happen to be regenerated on. Early in the
+ * week they pile onto today, which is honest: that is the week so far.
+ */
+function thisWeekAt(daysBack, hour, minute = 0) {
+  const when = new Date(weekStart(Date.now()))
+  when.setDate(when.getDate() + Math.max(0, new Date().getDay() - daysBack))
+  when.setHours(hour, minute, 0, 0)
+  return when.toISOString()
+}
+
+/** The same, a week earlier: recordings the report must not count. */
+function lastWeekAt(hour) {
+  const when = new Date(thisWeekAt(0, hour))
+  when.setDate(when.getDate() - 7)
+  return when.toISOString()
+}
+
+const WEEK_HISTORY = [
+  { description: 'Deep work', label: 'Deep work', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: thisWeekAt(3, 9, 15), duration: 7200 },
+  { description: 'Client call', label: 'Client call', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: thisWeekAt(2, 11), duration: 2700 },
+  { description: 'Deep work', label: 'Deep work', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: thisWeekAt(2, 12, 30), duration: 9000 },
+  { description: 'Invoicing', label: 'Invoicing', projectName: 'Admin', projectId: 22, workspaceId: 10, start: thisWeekAt(1, 15), duration: 4500 },
+  { description: '', label: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: thisWeekAt(1, 16), duration: 12600 },
+  { description: 'Quoting', label: 'Quoting', projectName: 'No project', projectId: null, workspaceId: 10, start: thisWeekAt(0, 8), duration: 3600 },
+  // Last week, so it must not be counted — the tab reports the calendar week,
+  // not a rolling seven days.
+  { description: 'Deep work', label: 'Deep work', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: lastWeekAt(10), duration: 6000 }
+]
 
 export const SCENARIOS = [
   {
@@ -228,28 +263,102 @@ export const SCENARIOS = [
     title: 'Offline',
     description: 'The phone could not reach Toggl.',
     state: { status: null, error: 'Phone is offline or Toggl is unavailable.' }
+  },
+  {
+    name: '10-report',
+    title: 'Report',
+    scrolls: true,
+    description:
+      'The second tab, one swipe left of the month: a card per stretch of time, the calendar week Sunday to Saturday, then today, then the payroll cycle in progress, with the cycle just finished joining them for a week after it closes. Each has its own total and its own breakdown by project, counted from the very list the first tab is drawing, so they cost no request, and the timer still running is counted into every stretch it belongs to. Only the first panel of it is shown here.',
+    state: {
+      tab: 1,
+      status: {
+        configured: true,
+        userName: 'Tyler Petrov',
+        running: {
+          id: 4242,
+          workspaceId: 10,
+          description: 'Deep work',
+          label: 'Deep work',
+          projectId: 20,
+          projectName: 'WristTrack',
+          start: RUNNING_START
+        },
+        presets: WEEK_HISTORY
+      },
+      error: ''
+    }
+  },
+  {
+    name: '12-report-busy',
+    title: 'Report, a busy week',
+    scrolls: true,
+    tall: true,
+    description:
+      'Rendered whole rather than a panel at a time, to show what scrolling reaches: the cards are as tall as what is in them, so a week spread over more projects makes a longer report, and the tab bar comes along at the end of it.',
+    state: {
+      tab: 1,
+      status: {
+        configured: true,
+        userName: 'Tyler Petrov',
+        running: null,
+        presets: [
+          ...WEEK_HISTORY,
+          { description: 'Quoting', label: 'Quoting', projectName: 'Quotes', projectId: 23, workspaceId: 10, start: thisWeekAt(2, 14), duration: 5400 },
+          { description: 'Email', label: 'Email', projectName: 'Admin', projectId: 22, workspaceId: 10, start: thisWeekAt(0, 10), duration: 2400 },
+          { description: 'Site visit', label: 'Site visit', projectName: 'Callouts', projectId: 24, workspaceId: 10, start: thisWeekAt(0, 12), duration: 4800 },
+          { description: 'Parts run', label: 'Parts run', projectName: 'Supplies', projectId: 25, workspaceId: 10, start: thisWeekAt(0, 15), duration: 1800 }
+        ]
+      },
+      error: ''
+    }
+  },
+  {
+    name: '11-report-empty',
+    title: 'Report, nothing tracked',
+    description:
+      'Nothing inside any of the stretches the report totals, which it says once rather than four times over. The month tab next door may still have plenty in it.',
+    state: {
+      tab: 1,
+      status: {
+        configured: true,
+        userName: 'Tyler Petrov',
+        running: null,
+        presets: [
+          { description: 'Deep work', label: 'Deep work', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: daysAgoAt(40, 10), duration: 6000 }
+        ]
+      },
+      error: ''
+    }
   }
 ]
 
-/** Loads page/home once and returns a factory for fresh page instances. */
+let factory = null
+
+/** Loads the page module once and returns a factory for fresh instances. */
 export async function loadPage() {
+  if (factory) return factory
+
+  const path = '../page/home/index.page.js'
   let options = null
   globalThis.Page = (value) => {
     options = value
   }
   globalThis.getApp = () => ({ _options: { globalData: { messaging: transport() } } })
 
-  await import('../page/home/index.page.js')
-  if (!options) throw new Error('page/home did not call Page()')
+  await import(path)
+  if (!options) throw new Error(`${path} did not call Page()`)
 
-  return (state) => {
+  factory = (state) => {
     const page = { ...options, state: { ...structuredClone(options.state), ...structuredClone(state) } }
     page.messaging = transport()
     page.request = () => new Promise(() => {})
-    page.state.widgets = []
+    page.state.views = []
     page.state.mounted = true
     return page
   }
+
+  return factory
 }
 
 function transport() {
@@ -267,10 +376,20 @@ function transport() {
 }
 
 /** Renders one scenario and returns the widgets it drew, in z-order. */
-export async function renderScenario(makePage, scenario) {
+export async function renderScenario(scenario) {
   const ui = await import('./stubs/ui.mjs')
+  const makePage = await loadPage()
   ui.drain()
-  const page = await makePage(scenario.state)
+  const page = makePage(scenario.state)
   page.render()
-  return ui.drain()
+  return drawnWidgets(ui.drain())
+}
+
+/**
+ * What is actually on the panel. A SCROLL_LIST is structure rather than
+ * something drawn: the rows it was unrolled into are the drawn things, and the
+ * box it holds them in is allowed to reach the corners they must clear.
+ */
+export function drawnWidgets(widgets) {
+  return widgets.filter((item) => item.type !== 'VIEW_CONTAINER' && item.type !== 'SCROLL_LIST')
 }

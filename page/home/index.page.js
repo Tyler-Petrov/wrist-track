@@ -1,25 +1,24 @@
 import * as hmUI from '@zos/ui'
 import { setInterval, clearInterval, setTimeout, clearTimeout } from '@zos/timer'
 import { localStorage } from '@zos/storage'
+import { onGesture, offGesture, GESTURE_LEFT, GESTURE_RIGHT } from '@zos/interaction'
+import { scrollTo } from '@zos/page'
 import { BasePage } from '@zeppos/zml/base-page'
-import { COLORS, CONTENT_WIDTH, GUTTER, SCREEN, u, x, y } from './theme'
-import { historyDay, historySubtitle, parseStart } from '../../shared/history'
+import { COLORS, CONTENT_WIDTH, GUTTER, SCREEN, u, x, y } from '../theme'
+import { BAR_HEIGHT, TABS_TOP, TAB_MONTH, TAB_WEEK, drawTabDots } from '../tabs'
+import { drawReport, reportPlan, reportSubtitle } from '../report'
+import { formatDuration, historyDay, historySubtitle, parseStart, trustRunning } from '../../shared/history'
+import {
+  cycleReport,
+  dayReport,
+  previousCycleReport,
+  showsPreviousCycle,
+  weekReport
+} from '../../shared/report'
 
 // The watch keeps its own copy of the last screen it drew, so opening the app
 // shows the timer immediately instead of a spinner while the phone is asked.
 const STATUS_KEY = 'wt.status'
-
-/**
- * How old that copy may be before a *running* timer in it stops being worth
- * drawing. The elapsed clock is computed from the start time, so it is right
- * whenever the timer really is still going — the risk is the word "Running"
- * itself, on an entry stopped from the phone days ago.
- *
- * A copy showing nothing running has no such claim to be wrong about: it is a
- * menu of recent jobs, which is exactly what somebody opening the app to start
- * one wants, however old it is. So only the running case expires.
- */
-const RESTORE_RUNNING_MAX_AGE = 60 * 60 * 1000
 
 // A timer stopped on the phone or the web app has to be noticed by asking,
 // because a Side Service cannot hold a socket open to Toggl. The phone side
@@ -43,19 +42,45 @@ const ROW_HEIGHT = 78
 const EDGE = 26
 const ROW_WIDTH = 432 - EDGE * 2
 
-// The history draws every recording as a row and relies on the platform's
-// native vertical page scroll to reach the ones past the panel; the rows are
-// laid out from this baseline on a fixed pitch.
+/**
+ * The history is one SCROLL_LIST. A list clips its rows at the edges of the box
+ * it is given, and it draws over anything else whatever order it was created
+ * in, so the box has to be exactly the part of the panel nothing else wants:
+ * from the top, or from under the live row when there is one, down to the tab
+ * bar. Rows appear and disappear at those edges, which is why each edge is the
+ * edge of something solid.
+ */
+const ROW_SPACE = 10
+
+// The kinds of row the list is built from.
+const ROW_TYPE = 1
+const HEADING_TYPE = 2
+const LEAD_TYPE = 3
+
+const DAY_HEADING_HEIGHT = 46
+
+/**
+ * With nothing running, the line that opens the month is the list's own first
+ * row and scrolls away with the recordings, so nothing is pinned above them at
+ * all and nothing is cut off under it.
+ */
+const LEAD_HEIGHT = 62
+const LEAD_TEXT_TOP = 24
+
+/**
+ * With a timer running the live row is pinned instead, because its clock
+ * changes every second and a list is refreshed by handing the whole of it
+ * back. The list starts at the foot of that row, so a recording scrolling out
+ * of sight goes under its edge rather than vanishing in clear air.
+ */
 const LIST_TOP = 68
-const ROW_PITCH = 88
 
-// Breathing room between one day's last recording and the next day's heading.
-const DAY_GAP = 14
-const DAY_HEADING_HEIGHT = 38
+// Where the empty history sits.
+const EMPTY_TOP = 90
+const EMPTY_HEIGHT = 120
 
-// Clear space under the last row. Without it the final entry sits against the
-// bottom of the scroll, where the panel's corners cut into it.
-const LIST_BOTTOM_PAD = 56
+// Clear space under the last card of the report, before the tab bar.
+const REPORT_PAD = 14
 
 // The mark each row carries, drawn at its natural size from the asset: play
 // to start that job, stop to end the one running.
@@ -114,6 +139,23 @@ function errorText(error) {
   return (error && (error.message || error.error)) || 'Could not reach Toggl.'
 }
 
+/**
+ * A SCROLL_LIST is told which template each row uses as runs of indexes rather
+ * than one entry per row, so a month of recordings under a dozen headings is a
+ * couple of dozen ranges. `end` is the index past the run.
+ */
+function runsOf(types) {
+  const runs = []
+  types.forEach((type, index) => {
+    const last = runs[runs.length - 1]
+    if (last && last.type_id === type) last.end = index + 1
+    else runs.push({ start: index, end: index + 1, type_id: type })
+  })
+  return runs
+}
+
+
+
 Page(
   BasePage({
     state: {
@@ -131,7 +173,11 @@ Page(
       stale: false,
       checking: false,
       pollUntil: 0,
-      restoreNote: ''
+      restoreNote: '',
+      // The tab showing, and the widgets drawn for it.
+      tab: TAB_MONTH,
+      widgets: [],
+      reportWidgets: {}
     },
     onInit() {
       this.adoptLiveTransport()
@@ -141,6 +187,7 @@ Page(
       this.restoreStatus()
       this.touch()
       this.loadStatus()
+      this.watchForSwipe()
     },
     build() {
       this.state.mounted = true
@@ -155,6 +202,55 @@ Page(
       this.state.requestGeneration += 1
       this.stopClock()
       this.clearPoll()
+      try {
+        offGesture()
+      } catch (_) {
+        // Nothing was listening, which is the state we wanted anyway.
+      }
+    },
+
+    /**
+     * Sideways swipes change tab. Only the ones that have somewhere to go are
+     * taken: a swipe right on the month is the system's own way out of the
+     * app, and swallowing it would trap the wearer in here. Vertical gestures
+     * are never touched — they are the page scroll that reaches the month.
+     */
+    watchForSwipe() {
+      try {
+        onGesture({
+          callback: (event) => {
+            if (event === GESTURE_LEFT && this.state.tab === TAB_MONTH) {
+              this.showTab(TAB_WEEK)
+              return true
+            }
+            if (event === GESTURE_RIGHT && this.state.tab === TAB_WEEK) {
+              this.showTab(TAB_MONTH)
+              return true
+            }
+            return false
+          }
+        })
+      } catch (error) {
+        // The dots are still a tap target, so the other tab stays reachable.
+        console.log(`swipe: not available — ${(error && error.message) || 'unknown'}`)
+      }
+    },
+
+    /**
+     * Swaps the tab in place. Nothing is pushed and nothing is navigated to,
+     * so there is no transition to sit through: the page simply draws the
+     * other screen, back at the top of it.
+     */
+    showTab(index) {
+      if (index === this.state.tab) return
+      this.state.tab = index
+      this.touch()
+      try {
+        scrollTo({ y: 0 })
+      } catch (_) {
+        // Landing mid-list is untidy, not broken.
+      }
+      this.render()
     },
 
     /**
@@ -174,6 +270,11 @@ Page(
 
     // ---- widget helpers -----------------------------------------------------
 
+    /**
+     * Straight onto the page, which is what scrolls: the month reaches past
+     * the panel and the platform's own vertical page scroll is how the rest
+     * of it is read.
+     */
     add(type, options) {
       const widget = hmUI.createWidget(type, options)
       this.state.widgets.push(widget)
@@ -184,6 +285,7 @@ Page(
       this.state.widgets.forEach((widget) => hmUI.deleteWidget(widget))
       this.state.widgets = []
       this.state.timerWidget = null
+      this.state.reportWidgets = {}
     },
     stopClock() {
       if (this.state.interval) clearInterval(this.state.interval)
@@ -215,8 +317,8 @@ Page(
         text_style: style
       })
     },
-    /** Left-aligned line inside a row or the running card. */
-    line(value, { left, top, width, height, size, color = COLORS.text }) {
+    /** Left-aligned line inside a row, or right-aligned for a duration. */
+    line(value, { left, top, width, height, size, color = COLORS.text, align = hmUI.align.LEFT }) {
       return this.add(hmUI.widget.TEXT, {
         text: value,
         x: x(left),
@@ -225,9 +327,20 @@ Page(
         h: u(height),
         color,
         text_size: u(size),
-        align_h: hmUI.align.LEFT,
+        align_h: align,
         align_v: hmUI.align.CENTER_V,
         text_style: hmUI.text_style.ELLIPSIS
+      })
+    },
+    /** A bare rectangle, placed rather than spanning the content width. */
+    rect({ left, top, width, height, color, radius = height / 2 }) {
+      return this.add(hmUI.widget.FILL_RECT, {
+        x: x(left),
+        y: y(top),
+        w: u(width),
+        h: u(height),
+        radius: u(radius),
+        color
       })
     },
     button({ label, top, height = 92, left = EDGE, width = ROW_WIDTH, size = 30, radius = BUTTON_RADIUS, color, pressed, textColor = COLORS.text, onClick }) {
@@ -316,15 +429,15 @@ Page(
     },
 
     /**
-     * Where every row and day heading sits. Drawing and measuring walk the
-     * same plan, so the background cannot end up shorter than the list.
+     * The month in the order it is read: a heading for each day that has
+     * recordings, and that day's recordings under it.
      *
      * The days run newest first, the way the reply arrives, but each day's
      * recordings run earliest to latest — a day reads as the day was worked.
      * Sorting here rather than on the phone leaves the cache newest-first,
      * which is what promoting a finished run to the top of it relies on.
      */
-    planList(items, from) {
+    planList(items) {
       const groups = []
       let currentDay = null
       ;(items || []).forEach((item) => {
@@ -339,19 +452,11 @@ Page(
       })
 
       const steps = []
-      let top = from
-      groups.forEach((group, index) => {
-        if (group.day) {
-          if (index > 0) top += DAY_GAP
-          steps.push({ heading: group.day, top })
-          top += DAY_HEADING_HEIGHT
-        }
-        this.byStart(group.items).forEach((item) => {
-          steps.push({ item, top })
-          top += ROW_PITCH
-        })
+      groups.forEach((group) => {
+        if (group.day) steps.push({ heading: group.day })
+        this.byStart(group.items).forEach((item) => steps.push({ item }))
       })
-      return { steps, bottom: top }
+      return steps
     },
 
     /** Earliest first, with anything undateable left at the end in order. */
@@ -367,42 +472,221 @@ Page(
         .map((entry) => entry.item)
     },
 
-    /** Draws a plan; every row starts the job it names. */
-    drawList(steps, onPick) {
-      steps.forEach((step) => {
-        if (step.heading) return this.text(step.heading, step.top, 28, 19, COLORS.muted)
-        this.jobRow(step.item, step.top, {
-          subtitle: this.subtitleOf(step.item),
-          onClick: () => onPick(step.item)
-        })
+    /**
+     * The month, as one widget.
+     *
+     * Drawn row by row it was a hundred and forty of them, and every widget on
+     * this platform is a call out of the JS engine: a month took seconds to
+     * put on screen and seconds more to take down again, which is what made
+     * changing tabs feel broken. A SCROLL_LIST is a single widget that the
+     * firmware fills and recycles itself, from a template per kind of row and
+     * an array of the words to put in them.
+     *
+     * It scrolls inside its own box, which is why nothing else on the page has
+     * to move: the header stays, and so do the dots.
+     */
+    drawList(steps, { lead, running, onPick }) {
+      // With nothing running the lead line is the list's own first row, so it
+      // scrolls away with the recordings instead of being drawn over them.
+      const plan = [
+        ...(running ? [] : [{ row: { label: lead }, type: LEAD_TYPE }]),
+        ...steps.map((step) =>
+          step.heading
+            ? { row: { label: step.heading }, type: HEADING_TYPE }
+            : {
+                row: {
+                  label: step.item.label || step.item.description,
+                  subtitle: this.subtitleOf(step.item),
+                  icon: PLAY_ICON
+                },
+                type: ROW_TYPE,
+                item: step.item
+              }
+        )
+      ]
+      const runs = runsOf(plan.map((entry) => entry.type))
+
+      const top = running ? LIST_TOP + ROW_HEIGHT : 0
+      return this.add(hmUI.widget.SCROLL_LIST, {
+        x: x(EDGE),
+        y: y(top),
+        w: u(ROW_WIDTH),
+        h: u(TABS_TOP - top),
+        item_space: u(ROW_SPACE),
+        item_config: [this.rowTemplate(), this.headingTemplate(), this.leadTemplate()],
+        item_config_count: 3,
+        data_array: plan.map((entry) => entry.row),
+        data_count: plan.length,
+        data_type_config: runs,
+        data_type_config_count: runs.length,
+        item_click_func: (list, index) => {
+          const entry = plan[index]
+          if (entry && entry.item) onPick(entry.item)
+        }
       })
     },
+
+    /** One recording: what it was, when it ran, and the mark to start it again. */
+    rowTemplate() {
+      const textWidth = ROW_WIDTH - 44 - ICON_SIZE - 12
+      return {
+        type_id: ROW_TYPE,
+        item_bg_color: COLORS.surface,
+        item_bg_radius: u(ROW_RADIUS),
+        item_height: u(ROW_HEIGHT),
+        text_view: [
+          { x: u(22), y: u(12), w: u(textWidth), h: u(28), key: 'label', color: 0xf2e6f6, text_size: u(22), align_h: hmUI.align.LEFT },
+          { x: u(22), y: u(42), w: u(textWidth), h: u(24), key: 'subtitle', color: COLORS.muted, text_size: u(16), align_h: hmUI.align.LEFT }
+        ],
+        text_view_count: 2,
+        image_view: [
+          { x: u(ROW_WIDTH - 22 - ICON_SIZE), y: u((ROW_HEIGHT - ICON_SIZE) / 2), w: u(ICON_SIZE), h: u(ICON_SIZE), key: 'icon' }
+        ],
+        image_view_count: 1
+      }
+    },
+    /**
+     * The line that opens the month, as a row of the list.
+     */
+    leadTemplate() {
+      return {
+        type_id: LEAD_TYPE,
+        item_bg_color: COLORS.background,
+        item_bg_radius: 0,
+        item_height: u(LEAD_HEIGHT),
+        text_view: [
+          {
+            x: 0,
+            y: u(LEAD_TEXT_TOP),
+            w: u(ROW_WIDTH),
+            h: u(30),
+            key: 'label',
+            color: this.state.acting ? COLORS.accent : COLORS.muted,
+            text_size: u(18),
+            align_h: hmUI.align.CENTER_H
+          }
+        ],
+        text_view_count: 1,
+        image_view: [],
+        image_view_count: 0
+      }
+    },
+    /** A day, which is a heading rather than anything to tap. */
+    headingTemplate() {
+      return {
+        type_id: HEADING_TYPE,
+        item_bg_color: COLORS.background,
+        item_bg_radius: 0,
+        item_height: u(DAY_HEADING_HEIGHT),
+        text_view: [
+          { x: 0, y: 0, w: u(ROW_WIDTH), h: u(DAY_HEADING_HEIGHT), key: 'label', color: COLORS.muted, text_size: u(19), align_h: hmUI.align.CENTER_H }
+        ],
+        text_view_count: 1,
+        image_view: [],
+        image_view_count: 0
+      }
+    },
+
     // ---- screens ------------------------------------------------------------
 
+    /**
+     * The tab showing, and the dots over it. Both are redrawn together, so a
+     * poll landing while the week is up redraws the week — the two tabs are
+     * one page reading one reply, and cannot fall out of step.
+     */
     render() {
       if (!this.state.mounted) return
       this.clear()
 
-      // Tall enough to cover a scrolling list, or the page scrolls the rows
-      // off the painted area and the bare panel shows through beneath them.
+      const barTop = this.state.tab === TAB_WEEK ? this.renderWeek() : this.renderMonth()
+      drawTabDots(this, this.state.tab, (index) => this.showTab(index), barTop)
+
+      // A running timer moves numbers on both tabs — the elapsed clock on the
+      // month, the total on the week — so the second hand runs for whichever
+      // is showing, and stops with the timer.
+      const running = this.state.status && this.state.status.running
+      if (running) this.state.interval = setInterval(() => this.tick(running), 1000)
+    },
+
+    /**
+     * Fills the tab behind whatever it is about to hold. One panel is enough
+     * for the month, whose list scrolls inside its own box; a report longer
+     * than the screen scrolls the page, and the ground has to reach as far as
+     * it does or the bare panel shows through beneath the last card.
+     */
+    ground(height = 514) {
       this.add(hmUI.widget.FILL_RECT, {
         x: 0,
         y: 0,
         w: SCREEN.width,
-        h: Math.max(SCREEN.height, u(this.contentHeight())),
+        h: Math.max(SCREEN.height, u(height)),
         color: COLORS.background
       })
+    },
 
-      if (this.state.error) return this.renderMessage("Can't sync", this.state.error, 'Try again')
-      if (!this.state.status) return this.renderSyncing()
-      if (!this.state.status.configured) {
-        return this.renderMessage(
+    /**
+     * The month always fits the panel: what is long about it is the list, and
+     * a list scrolls inside its own box. So the bar goes where it always goes.
+     */
+    renderMonth() {
+      this.ground()
+
+      if (this.state.error) this.renderMessage("Can't sync", this.state.error, 'Try again')
+      else if (!this.state.status) this.renderSyncing()
+      else if (!this.state.status.configured) {
+        this.renderMessage(
           'Connect Toggl',
           'Open Zepp on your phone, then Devices, WristTrack, Settings, and paste your Toggl API token.',
           'Check again'
         )
+      } else this.renderHistory()
+
+      return TABS_TOP
+    },
+
+    /**
+     * The cards of the report tab, in the order they are read: the week being
+     * lived in, then today, then the payroll cycle in progress. The one before
+     * it joins them for a week after it closes, which is long enough to see
+     * what the pay arriving was for.
+     *
+     * All of them are counted from the very list the month tab is drawing —
+     * never from storage or the phone — at one moment, out of one set of
+     * recordings, so no two cards can disagree and none of them costs a
+     * request.
+     */
+    reports(now = Date.now()) {
+      const status = this.state.status || {}
+      const presets = status.presets || []
+      const running = status.running
+
+      const week = weekReport(presets, running, now)
+      const cycle = cycleReport(presets, running, now)
+      const cards = [
+        { key: 'week', heading: `This week · ${week.label}`, report: week },
+        { key: 'day', heading: 'Today', report: dayReport(presets, running, now) },
+        { key: 'cycle', heading: `Pay period · ${cycle.label}`, report: cycle }
+      ]
+
+      if (showsPreviousCycle(now)) {
+        const previous = previousCycleReport(presets, running, now)
+        cards.push({ key: 'previous', heading: `Last period · ${previous.label}`, report: previous })
       }
-      return this.renderHistory()
+      return cards
+    },
+    /**
+     * The report is as tall as its cards, and its cards are as tall as what is
+     * in them. Short enough to fit and it sits on the panel with the bar at the
+     * foot of it; longer and the page scrolls, taking the bar along at the end.
+     */
+    renderWeek() {
+      const cards = this.reports()
+      const plan = reportPlan(cards)
+      const barTop = Math.max(TABS_TOP, plan.bottom + REPORT_PAD)
+
+      this.ground(barTop + BAR_HEIGHT)
+      drawReport(this, cards, Boolean(this.state.status), plan)
+      return barTop
     },
 
     /**
@@ -448,19 +732,32 @@ Page(
 
       const note = this.statusNote()
       const busy = this.state.acting ? (running ? 'Stopping' : 'Starting') : ''
-      const lead = running ? 'Tracking · tap to stop' : 'This month · tap to start'
-      this.text(
-        busy || (note ? `${lead.split(' · ')[0]} · ${note.toLowerCase()}` : lead),
-        30,
-        26,
-        18,
-        this.state.acting ? COLORS.accent : COLORS.muted
-      )
+      const opener = running ? 'Tracking · tap to stop' : 'This month · tap to start'
+      const lead = busy || (note ? `${opener.split(' · ')[0]} · ${note.toLowerCase()}` : opener)
 
-      let top = LIST_TOP
+      // With a timer running the lead line labels the row pinned under it, so
+      // it is pinned too; with nothing running it belongs to the list, which
+      // is the only way it can scroll out of the way of the recordings.
+      if (running || presets.length === 0) {
+        this.text(lead, 30, 26, 18, this.state.acting ? COLORS.accent : COLORS.muted)
+      }
+      if (presets.length > 0) {
+        // Grouped under day headings. The list arrives newest first, so each
+        // day's recordings are already contiguous; a day with nothing tracked
+        // simply never comes up. Rows with no usable start — the
+        // configured-default fallback — draw ungrouped.
+        this.drawList(this.planList(presets), {
+          lead,
+          running,
+          onPick: (preset) => (running ? this.switchTo(running, preset) : this.start(preset))
+        })
+      }
+
       if (running) {
-        // The clock is the second line, ticking in place.
-        this.state.timerWidget = this.jobRow(running, top, {
+        // Not a row of the list: its clock changes every second, and a list is
+        // refreshed by handing the whole of it back, which is far too much to
+        // spend on a second hand. The list begins at the foot of this row.
+        this.state.timerWidget = this.jobRow(running, LIST_TOP, {
           subtitle: formatElapsed(running.start),
           icon: STOP_ICON,
           color: this.state.acting ? COLORS.accentPressed : COLORS.accent,
@@ -469,28 +766,53 @@ Page(
           subtitleColor: COLORS.onAccentMuted,
           onClick: () => this.stop()
         })
-        this.state.interval = setInterval(() => {
-          if (this.state.timerWidget) {
-            this.state.timerWidget.setProperty(hmUI.prop.TEXT, formatElapsed(running.start))
-          }
-        }, 1000)
-        top += ROW_PITCH + DAY_GAP
-      }
-
-      if (presets.length === 0) {
-        if (running) return
-        this.panel(90, 120, COLORS.surface)
-        this.text('Nothing tracked yet', 118, 34, 24, COLORS.text)
-        this.text('Start one from Toggl first', 152, 28, 18, COLORS.muted)
         return
       }
 
-      // Grouped under day headings. The list arrives newest first, so each
-      // day's recordings are already contiguous; a day with nothing tracked
-      // simply never comes up. Rows with no usable start — the
-      // configured-default fallback — draw ungrouped.
-      const { steps } = this.planList(presets, top)
-      this.drawList(steps, (preset) => (running ? this.switchTo(running, preset) : this.start(preset)))
+      if (presets.length === 0) {
+        this.panel(EMPTY_TOP, EMPTY_HEIGHT, COLORS.surface)
+        this.text('Nothing tracked yet', EMPTY_TOP + 28, 34, 24, COLORS.text)
+        this.text('Start one from Toggl first', EMPTY_TOP + 62, 28, 18, COLORS.muted)
+      }
+    },
+
+    /**
+     * One second of a running timer, on both tabs at once: the clock on the
+     * live row, and the week's total, which the same second is adding to.
+     *
+     * Only the numbers are touched. Redrawing would cost the scroll position
+     * of whichever tab is being read, and the week cannot reorder itself in a
+     * second — the bars keep the widths they were drawn at until something
+     * else redraws them.
+     */
+    tick(running) {
+      if (this.state.timerWidget) {
+        this.state.timerWidget.setProperty(hmUI.prop.TEXT, formatElapsed(running.start))
+      }
+
+      // Every card the report drew, by the stretch it totals. A card with
+      // nothing in it drew no figure and has nothing here to correct: a timer
+      // started before midnight adds to the week without adding to the day.
+      //
+      // Which is why the way out is an empty set rather than a missing week: a
+      // timer running since before Sunday belongs to no week and to every
+      // longer stretch, so the week can be the empty card while the payroll
+      // cycle is the one still counting.
+      const drawn = this.state.reportWidgets
+      if (Object.keys(drawn).length === 0) return
+
+      this.reports().forEach((card) => {
+        const widgets = drawn[card.key]
+        if (!widgets) return
+        widgets.total.setProperty(hmUI.prop.TEXT, formatDuration(card.report.total))
+        if (widgets.subtitle) {
+          widgets.subtitle.setProperty(hmUI.prop.TEXT, reportSubtitle(card.report))
+        }
+        const live = card.report.projects.filter((project) => project.running > 0)[0]
+        if (widgets.live && live) {
+          widgets.live.setProperty(hmUI.prop.TEXT, formatDuration(live.seconds))
+        }
+      })
     },
 
     /**
@@ -513,17 +835,6 @@ Page(
       // them the reply's own line is the better answer, not a worse one
       // computed from nothing.
       return historyDay(item) ? historySubtitle(item) : item.subtitle || item.projectName
-    },
-
-    /** How far the drawn screen reaches, so the background can cover it. */
-    contentHeight() {
-      if (this.state.error || !this.state.status || !this.state.status.configured) return SCREEN.height
-      const presets = this.state.status.presets || []
-      // The running row sits above the list and pushes it down by its own
-      // height; measuring walks the same plan drawing does.
-      const from = this.state.status.running ? LIST_TOP + ROW_PITCH + DAY_GAP : LIST_TOP
-      const { bottom } = this.planList(presets, from)
-      return Math.max(SCREEN.height, bottom + LIST_BOTTOM_PAD)
     },
 
     /**
@@ -639,11 +950,12 @@ Page(
         const { savedAt, status } = JSON.parse(saved) || {}
         if (!status) return this.noteRestore('saved entry held no screen')
 
-        // A missing, negative or absurd age means the watch clock moved under
-        // us; treat it as old rather than trusting it.
+        // A copy showing nothing running has no claim to be wrong about: it is
+        // a menu of recent jobs, which is exactly what somebody opening the app
+        // to start one wants, however old it is. So only the running case
+        // expires, under the limit the week's totals honour too.
         const age = Date.now() - Number(savedAt)
-        const trustworthy = Number.isFinite(age) && age >= 0 && age < RESTORE_RUNNING_MAX_AGE
-        if (status.running && !trustworthy) {
+        if (status.running && !trustRunning(savedAt)) {
           return this.noteRestore(`held back, saved ${Math.round(age / 60000)}m ago`)
         }
 
