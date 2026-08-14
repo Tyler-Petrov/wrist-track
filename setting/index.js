@@ -311,7 +311,7 @@ AppSettingsPage({
 
         hasToken &&
           card('Timer defaults', [
-            bodyText('The watch shows your past week of Toggl recordings. These defaults only kick in when there is no history yet.'),
+            bodyText('The watch shows your past month of Toggl recordings. These defaults only kick in when there is no history yet.'),
             field(
               'Default description',
               null,

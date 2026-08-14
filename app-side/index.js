@@ -208,7 +208,7 @@ async function fetchRecent(client, token, account) {
 }
 
 /**
- * Re-reads the week of history without making anybody wait for it. The cached
+ * Re-reads the month of history without making anybody wait for it. The cached
  * copy has already been served; when this lands, the next poll picks up the
  * new list by its changed signature. Fire-and-forget is safe here: a Side
  * Service closed mid-read simply leaves the cached copy in place, and the
@@ -234,7 +234,7 @@ function lazyReloadHistory(token) {
         ...latest,
         presets: mergeFreshHistory(latest.presets, fresh.presets),
         presetsAt: Date.now(),
-        // Fresh names win; ids the new week no longer mentions keep their
+        // Fresh names win; ids the new window no longer mentions keep their
         // old name rather than losing it.
         projectNames: { ...cachedProjectNames(latest), ...fresh.projectNames }
       })
@@ -263,7 +263,7 @@ async function refreshStatus(token, cache) {
   const current = await client.request('/me/time_entries/current')
   assertCurrentToken(token)
 
-  // The week of history is re-read lazily, never on the poll's own clock —
+  // The month of history is re-read lazily, never on the poll's own clock —
   // that is what keeps a refresh to one request. The cached copy is what is
   // answered from; the re-read runs in the background when the copy has
   // expired, and its result arrives with a later poll.

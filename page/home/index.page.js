@@ -417,9 +417,9 @@ Page(
     },
 
     /**
-     * The week of history, every recording a row, reached by scrolling. A tap
-     * starts that job again — the row is the button, as it already is for the
-     * switch targets under the running card.
+     * The month of history, every recording a row, reached by scrolling. A
+     * tap starts that job again — the row is the button, as it already is for
+     * the switch targets under the running card.
      */
     renderReady() {
       const presets = this.state.status.presets || []
@@ -428,8 +428,8 @@ Page(
       const header = this.state.acting
         ? 'Starting'
         : note
-          ? `This week · ${note.toLowerCase()}`
-          : 'This week · tap to start'
+          ? `This month · ${note.toLowerCase()}`
+          : 'This month · tap to start'
       this.text(header, 30, 26, 18, this.state.acting ? COLORS.accent : COLORS.muted)
 
       if (presets.length === 0) {

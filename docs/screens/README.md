@@ -7,7 +7,7 @@ tree that `page/home/index.page.js` produces. Regenerate with `npm run screens`.
 - **Syncing, with the reason** — When the watch had nothing to draw, the spinner says why — so a storage failure, which would otherwise look exactly like a first launch, is visible without attaching the developer bridge. (`01c-syncing-reason.png`)
 - **Restored on launch** — Every launch after the first: the watch draws its saved screen immediately and marks it unconfirmed until the phone answers, usually within a second. (`01b-restored.png`)
 - **Connect Toggl** — No API token saved in Zepp yet. (`02-connect-toggl.png`)
-- **Ready** — Connected, no timer running, the past week of recordings as a scrolling list. A tap starts that job again. (`03-ready.png`)
+- **Ready** — Connected, no timer running, the past month of recordings as a scrolling list. A tap starts that job again. (`03-ready.png`)
 - **Ready, entry with no description** — Many Toggl entries are project-only; the project becomes the label. (`04b-ready-no-description.png`)
 - **Starting** — A recording tapped, waiting on Toggl. (`05-starting.png`)
 - **Running** — A timer is running; the elapsed time ticks once a second. (`06-running.png`)

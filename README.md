@@ -34,7 +34,7 @@ question. See [Staying in sync](#staying-in-sync) for why that matters.
 - Picks up timers started, stopped or re-labelled somewhere else — the Toggl
   phone app, the web app, the browser extension — usually within 15 seconds.
 - Starts and stops timers against Toggl Track API v9.
-- Shows your past week of recordings as a scrolling list, newest first, each
+- Shows your past month of recordings as a scrolling list, newest first, each
   row saying which day it ran, over what times, and for how long. Tap a
   recording to start that job again.
 - Re-labels a running timer in place: tap a job below the clock and the
@@ -93,12 +93,12 @@ The Side Service holds the second cache, and meters what reaches Toggl:
 
 - **Reads are served from cache.** A status check inside a 12-second window
   costs nothing. Opening the app twice in a minute is one request, not four.
-- **The week of history is cached for hours and re-read lazily.** It barely
+- **The month of history is cached for hours and re-read lazily.** It barely
   moves on its own — the things that change it from the watch are stops and
   re-labels, and those update the cached copy locally — so it is kept for six
   hours, and a routine poll stays a single request: the one asking what is
   running. When the copy does expire, it is served anyway and the re-read runs
-  in the background; the refreshed week arrives with a later poll instead of
+  in the background; the refreshed month arrives with a later poll instead of
   making any glance wait.
 - **Background checks may spend only 18 of the 30.** The remaining 12 are held
   back so start and stop still work at the end of a long session. A screen left
@@ -108,7 +108,7 @@ The Side Service holds the second cache, and meters what reaches Toggl:
   reserve survives.
 - **Actions compute their own result.** Toggl has already confirmed a stop, so
   the finished run is written to the top of the history locally — its start is
-  known and its stop is now — instead of re-reading the week. Stopping and
+  known and its stop is now — instead of re-reading the month. Stopping and
   re-labelling cost one request each, down from two and three; starting costs
   two, down from three. A stop noticed from elsewhere gets the same local
   write, plus a background re-read to catch anything else tracked away from
@@ -128,7 +128,7 @@ heavy hour of ten glances spends **12 of the 18** allowed. `test/side-service.te
 drives both of those against the real code.
 
 Worth being precise about where the win is: a glance half an hour after the
-last one costs one request — the status check — because the week of history
+last one costs one request — the status check — because the month of history
 answers from its own long cache. What the cache buys is that a second look
 inside the same glance is free, that actions cost less, and that the history
 is re-read a handful of times a day instead of on a half-hour clock. The limit
@@ -208,10 +208,11 @@ black screen; see *A black screen after install* below.
 
 Open **WristTrack** from the watch's app list.
 
-- **This week** — your past week of recordings, newest first, each row saying
-  which day it ran, over what times, and for how long — `Today · 9:00-10:20 ·
-  1h 20m · WristTrack`. Scroll down for the rest of the week; tap a recording
-  to start that job again.
+- **This month** — your past month of recordings, newest first, each row
+  saying which day it ran, over what times, and for how long — `Today ·
+  9:00-10:20 · 1h 20m · WristTrack`, with dates such as `Jul 24` past the last
+  week. Scroll down for the rest of the month; tap a recording to start that
+  job again.
 - **Running** — the pink card shows the live clock. The jobs below it are
   one-tap switches: tapping one re-labels the running entry without resetting
   the clock. Tap the card itself for the full list.
@@ -238,7 +239,7 @@ Your phone must be paired and online at the moment you press start or stop.
 | **Phone is offline or Toggl is unavailable.** | The phone lost its data connection, or Bluetooth to the watch dropped. |
 | **A timer is already running.** | Toggl already has a running entry. Refresh to pick it up. |
 | **Phone link is still starting.** | The watch app opened before the phone connection was ready. Press the button again. |
-| **Nothing tracked yet** | No entries in the last week. Track something once, from Toggl or the watch. |
+| **Nothing tracked yet** | No entries in the last month. Track something once, from Toggl or the watch. |
 
 ## "Send package to device failed"
 

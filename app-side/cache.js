@@ -28,7 +28,7 @@ export const REFRESH_LIMIT = HOURLY_LIMIT - MUTATION_RESERVE
 export const STATUS_MAX_AGE = 12 * 1000
 
 /**
- * The week of history barely moves, and the actions that change it from the
+ * The month of history barely moves, and the actions that change it from the
  * watch's side — stop, re-label — update the cached copy locally, so it can
  * be old without being wrong. When it does expire it is re-read lazily: the
  * cached copy is served immediately and the re-read happens in the
@@ -135,7 +135,7 @@ export const MERGE_GRACE_MS = 10 * 60 * 1000
  * no id, survives the merge rather than being silently overwritten. Only a
  * recording that ended moments ago qualifies, though: a cached row that ended
  * long ago and is absent from the fresh read was deleted in Toggl or aged out
- * of the week, and keeping it would resurrect it at the top of the list.
+ * of the window, and keeping it would resurrect it at the top of the list.
  */
 export function mergeFreshHistory(cachedHistory, freshHistory, now = Date.now()) {
   const fresh = freshHistory || []
@@ -165,7 +165,7 @@ export function entryAsPreset(running) {
 /**
  * A recording of the entry that was running, worked out locally: the start is
  * known and the stop is now, so the row Toggl would eventually report can be
- * written without re-reading the week from it.
+ * written without re-reading the month from it.
  */
 export function entryAsHistoryItem(running, now = Date.now()) {
   const startMs = parseStart(running.start)

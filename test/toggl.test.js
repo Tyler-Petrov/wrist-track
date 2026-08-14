@@ -119,7 +119,8 @@ test('a recording row says when it ran and for how long', () => {
     [
       { description: 'Review', project_id: 20, project_name: 'App', workspace_id: 10, duration: 4800, start: '2026-08-12T09:00:00Z' },
       { description: '', project_id: 20, project_name: 'App', workspace_id: 10, duration: 300, start: '2026-08-11T09:00:00Z' },
-      { description: 'Ship', workspace_id: 10, duration: 7200, start: '2026-08-07T09:00:00Z' }
+      { description: 'Ship', workspace_id: 10, duration: 7200, start: '2026-08-07T09:00:00Z' },
+      { description: 'Plan', workspace_id: 10, duration: 3600, start: '2026-07-20T09:00:00Z' }
     ],
     account,
     {},
@@ -128,12 +129,13 @@ test('a recording row says when it ran and for how long', () => {
 
   // With a description the project still gets named; without one the project
   // is already the first line, so the second line does not repeat it. The
-  // tracked range sits between the day and the length.
+  // tracked range sits between the day and the length, and past the last
+  // week the day becomes a date, since weekday names repeat inside a month.
   assert.deepEqual(
     history.map((item) => item.subtitle),
-    ['Today · 9:00-10:20 · 1h 20m · App', 'Yesterday · 9:00-9:05 · 5m', 'Fri · 9:00-11:00 · 2h']
+    ['Today · 9:00-10:20 · 1h 20m · App', 'Yesterday · 9:00-9:05 · 5m', 'Fri · 9:00-11:00 · 2h', 'Jul 20 · 9:00-10:00 · 1h']
   )
-  assert.deepEqual(history.map((item) => item.label), ['Review', 'App', 'Ship'])
+  assert.deepEqual(history.map((item) => item.label), ['Review', 'App', 'Ship', 'Plan'])
   // The fields a re-start needs survive alongside the display ones.
   assert.equal(history[0].start, '2026-08-12T09:00:00Z')
   assert.equal(history[0].duration, 4800)
@@ -150,6 +152,9 @@ test('durations and days read at wrist size', () => {
   assert.equal(dayLabel(Date.parse('2026-08-12T01:00:00Z'), now), 'Today')
   assert.equal(dayLabel(Date.parse('2026-08-11T23:00:00Z'), now), 'Yesterday')
   assert.equal(dayLabel(Date.parse('2026-08-09T12:00:00Z'), now), 'Sun')
+  // Beyond the past week a weekday would repeat, so the date takes over.
+  assert.equal(dayLabel(Date.parse('2026-08-01T12:00:00Z'), now), 'Aug 1')
+  assert.equal(dayLabel(Date.parse('2026-07-20T12:00:00Z'), now), 'Jul 20')
 
   assert.equal(clockLabel(Date.parse('2026-08-12T09:05:00Z')), '9:05')
   assert.equal(clockLabel(Date.parse('2026-08-12T17:30:00Z')), '17:30')
@@ -264,9 +269,9 @@ test('asks Toggl for an explicit history window with inline project names', () =
   // end_date is exclusive, so today's entries need tomorrow as the bound.
   assert.match(path, /end_date=2026-08-01/)
 
-  // The watch shows the past week, so that is what is asked for by default.
-  const week = recentEntriesPath(Date.parse('2026-07-31T06:00:00Z'))
-  assert.match(week, /start_date=2026-07-24/)
+  // The watch shows the past month, so that is what is asked for by default.
+  const month = recentEntriesPath(Date.parse('2026-07-31T06:00:00Z'))
+  assert.match(month, /start_date=2026-07-01/)
 })
 
 test('drops deleted and running entries from the history', () => {

@@ -55,7 +55,7 @@ export function asArray(value) {
   return value && Array.isArray(value.items) ? value.items : []
 }
 
-export const HISTORY_DAYS = 7
+export const HISTORY_DAYS = 30
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const isoDate = (ms) => new Date(ms).toISOString().slice(0, 10)
@@ -118,10 +118,12 @@ export function formatDuration(seconds) {
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 /**
- * Which day a recording belongs to, in the phone's local time. The list only
- * reaches a week back, so a weekday name is never ambiguous for long.
+ * Which day a recording belongs to, in the phone's local time. Inside the
+ * past week a weekday name reads naturally and cannot repeat; the month
+ * reaches further back than that, so older recordings get the date instead.
  */
 export function dayLabel(startMs, now = Date.now()) {
   const start = new Date(startMs)
@@ -129,7 +131,8 @@ export function dayLabel(startMs, now = Date.now()) {
   midnight.setHours(0, 0, 0, 0)
   if (startMs >= midnight.getTime()) return 'Today'
   if (startMs >= midnight.getTime() - DAY_MS) return 'Yesterday'
-  return WEEKDAYS[start.getDay()]
+  if (startMs >= midnight.getTime() - 6 * DAY_MS) return WEEKDAYS[start.getDay()]
+  return `${MONTHS[start.getMonth()]} ${start.getDate()}`
 }
 
 /** A wall-clock stamp in the phone's local time: "9:05", "17:30". */
@@ -248,10 +251,13 @@ export function reduceAccount(me) {
   }
 }
 
-export const HISTORY_LIMIT = 20
+// Caps what crosses Bluetooth and what the watch stores, not what Toggl is
+// asked for: a busy month can outgrow it, in which case the oldest rows are
+// the ones that fall off.
+export const HISTORY_LIMIT = 50
 
 /**
- * The watch shows the past week of recordings, newest first, the way Toggl
+ * The watch shows the past month of recordings, newest first, the way Toggl
  * already returns /me/time_entries. Each row is one recording, duplicates and
  * all — the list is a history, not a menu of distinct jobs — and tapping one
  * starts that job again. The configured default is only used as a fallback

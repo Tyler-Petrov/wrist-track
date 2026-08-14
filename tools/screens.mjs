@@ -65,7 +65,7 @@ export const SCENARIOS = [
     name: '03-ready',
     title: 'Ready',
     description:
-      'Connected, no timer running, the past week of recordings as a scrolling list. A tap starts that job again.',
+      'Connected, no timer running, the past month of recordings as a scrolling list. A tap starts that job again.',
     scrolls: true,
     state: {
       status: {
@@ -78,7 +78,7 @@ export const SCENARIOS = [
           { description: 'Deep work', label: 'Deep work', subtitle: 'Yesterday · 8:30-10:00 · 1h 30m · WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: '2026-07-29T08:30:00+00:00', duration: 5400 },
           { description: 'Invoicing', label: 'Invoicing', subtitle: 'Mon · 11:00-11:25 · 25m', projectName: 'No project', projectId: null, workspaceId: 10, start: '2026-07-27T11:00:00+00:00', duration: 1500 },
           { description: '', label: 'Home Maintenance', subtitle: 'Sun · 14:00-15:05 · 1h 5m', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: '2026-07-26T14:00:00+00:00', duration: 3900 },
-          { description: 'Deep work', label: 'Deep work', subtitle: 'Fri · 9:15-11:15 · 2h · WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: '2026-07-24T09:15:00+00:00', duration: 7200 }
+          { description: 'Deep work', label: 'Deep work', subtitle: 'Jul 24 · 9:15-11:15 · 2h · WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: '2026-07-24T09:15:00+00:00', duration: 7200 }
         ]
       },
       error: ''
