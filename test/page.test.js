@@ -222,18 +222,109 @@ test('a screen that restores cleanly leaves no reason behind', async () => {
  */
 test('a restored screen offers to stop the timer, not "Stopping"', async () => {
   const page = await makePage({ status: SAVED_RUNNING, checking: true, reading: true })
-  const labels = texts(await drawn(page))
+  const widgets = await drawn(page)
+  const labels = texts(widgets)
 
-  assert.ok(labels.includes('Stop timer'), `expected a live Stop timer button, got ${JSON.stringify(labels)}`)
+  assert.ok(
+    widgets.some((widget) => widget.type === 'IMG' && /stop/.test(String(widget.src))),
+    'the live row should offer to stop'
+  )
   assert.ok(!labels.includes('Stopping'), 'a status read is not a pending stop')
   // The quiet note is the honest signal that a reply is outstanding.
-  assert.ok(labels.includes('Checking'))
+  assert.ok(
+    labels.some((text) => /checking/i.test(text)),
+    `expected the unconfirmed note, got ${JSON.stringify(labels)}`
+  )
 })
 
 test('a pending stop does say Stopping', async () => {
   const page = await makePage({ status: SAVED_RUNNING, acting: true })
   const labels = texts(await drawn(page))
   assert.ok(labels.includes('Stopping'), 'a real pending action still says so')
+})
+
+/**
+ * The list used to disappear behind the running card, so switching jobs meant
+ * opening a second screen. The whole history stays on screen now: the live
+ * entry is a row like the others, and the rows below re-label it in place.
+ */
+test('the history stays on screen while a timer runs', async () => {
+  const history = [recording('Client call', 0, 15), recording('Invoicing', 2, 11)]
+  const page = await makePage({ status: { ...SAVED_RUNNING, presets: history } })
+  const sent = []
+  page.request = (payload) => {
+    sent.push(payload)
+    return new Promise(() => {})
+  }
+
+  const widgets = await drawn(page)
+  const labels = texts(widgets)
+  assert.ok(labels.includes('Deep work'), 'the running entry leads')
+  assert.ok(labels.includes('Client call') && labels.includes('Invoicing'), 'and the history follows it')
+  assert.ok(labels.includes('Today'), 'still grouped by day')
+
+  const rows = widgets.filter((widget) => widget.type === 'BUTTON')
+  assert.equal(rows.length, 3, 'the live entry plus every recording')
+
+  // The live row stops the timer; the rows below switch it without a restart.
+  rows[0].click_func()
+  assert.equal(sent[0].method, 'STOP')
+
+  const fresh = await makePage({ status: { ...SAVED_RUNNING, presets: history } })
+  const switches = []
+  fresh.request = (payload) => {
+    switches.push(payload)
+    return new Promise(() => {})
+  }
+  const freshRows = (await drawn(fresh)).filter((widget) => widget.type === 'BUTTON')
+  freshRows[1].click_func()
+  assert.equal(switches[0].method, 'UPDATE', 'a history row re-labels rather than starting a second timer')
+  assert.equal(switches[0].params.entryId, SAVED_RUNNING.running.id)
+  assert.equal(switches[0].params.description, 'Client call')
+})
+
+/**
+ * The history includes the running job's own past recordings — for somebody
+ * tracking one job all month, that is the entire list. Tapping one names the
+ * job that is already running, which Toggl would accept while changing
+ * nothing, so it must not spend a request from the hour's allowance.
+ */
+test('tapping a recording of the job already running does nothing', async () => {
+  const sameJob = {
+    ...recording('Deep work', 1, 9),
+    projectId: SAVED_RUNNING.running.projectId,
+    workspaceId: SAVED_RUNNING.running.workspaceId
+  }
+  const page = await makePage({ status: { ...SAVED_RUNNING, presets: [sameJob] } })
+  const sent = []
+  page.request = (payload) => {
+    sent.push(payload)
+    return new Promise(() => {})
+  }
+
+  const rows = (await drawn(page)).filter((widget) => widget.type === 'BUTTON')
+  rows[1].click_func()
+  assert.deepEqual(sent, [], 'switching a job to itself is not worth a request')
+
+  // The live row above it still stops, so the screen is not inert.
+  rows[0].click_func()
+  assert.equal(sent[0].method, 'STOP')
+})
+
+test('the running row wears the accent, and its mark reads against it', async () => {
+  const page = await makePage({ status: SAVED_RUNNING })
+  const widgets = await drawn(page)
+  const rows = widgets.filter((widget) => widget.type === 'BUTTON')
+
+  // The live row keeps the colour the old card had; the rest stay tonal.
+  assert.equal(rows[0].normal_color, 0xe57cd8, 'the running row is the accent pink')
+  rows.slice(1).forEach((row) => assert.equal(row.normal_color, 0x3d1c4c, 'the history rows are not'))
+
+  // Hours are not padded to two digits: a timer left running for days reads
+  // 372:18:53, which is still the clock.
+  const clock = widgets.find((widget) => /^\d+:\d{2}:\d{2}$/.test(String(widget.text ?? '')))
+  assert.ok(clock, 'the clock is on the running row')
+  assert.notEqual(clock.color, 0xe57cd8, 'pink on pink would be unreadable')
 })
 
 test('a tap may interrupt a status read, but not another action', async () => {
@@ -292,6 +383,202 @@ test('a reply is written back, so the next launch has something to draw', async 
     SAVED,
     'the saved screen should survive'
   )
+})
+
+/**
+ * The list the phone sends is a history: one row per recording, so the same
+ * job can appear several times with different days and durations, and every
+ * one of them is drawn.
+ */
+test('every recording is drawn as a row; the page scrolls instead of paging', async () => {
+  const week = Array.from({ length: 8 }, (_, index) => ({
+    description: `Job ${index}`,
+    label: `Job ${index}`,
+    subtitle: 'Mon · 9:00-10:00 · 1h',
+    projectId: 20,
+    projectName: 'WristTrack',
+    workspaceId: 10,
+    start: `s${index}`
+  }))
+  const page = await makePage({ status: { ...SAVED, presets: week } })
+  const widgets = await drawn(page)
+  const labels = texts(widgets)
+
+  for (const item of week) {
+    assert.ok(labels.includes(item.label), `${item.label} should be a row, not behind a pager`)
+  }
+  assert.ok(!labels.includes('‹') && !labels.includes('›'), 'the pager is gone')
+  assert.ok(
+    widgets.some((widget) => widget.y + widget.h > 514),
+    'the list is expected to run past the panel, which is what the page scroll reaches'
+  )
+})
+
+/** A recording that really ran `days` ago, so the watch dates it itself. */
+const recording = (label, days, hour, duration = 3600) => {
+  const when = new Date()
+  when.setDate(when.getDate() - days)
+  when.setHours(hour, 0, 0, 0)
+  return {
+    description: label,
+    label,
+    projectId: 20,
+    projectName: 'WristTrack',
+    workspaceId: 10,
+    start: when.toISOString(),
+    duration
+  }
+}
+
+test('recordings group under one centred heading per day, tracked days only', async () => {
+  const page = await makePage({
+    status: {
+      ...SAVED,
+      presets: [recording('A', 0, 9), recording('B', 0, 7), recording('C', 2, 9)]
+    }
+  })
+  const widgets = await drawn(page)
+  const labels = texts(widgets)
+
+  // One heading per day that has recordings — the untracked day between them
+  // never appears — and the day is not repeated inside the rows beneath it.
+  assert.equal(labels.filter((text) => text === 'Today').length, 1)
+  assert.equal(labels.filter((text) => text === 'Yesterday').length, 0, 'nothing ran yesterday')
+
+  const heading = widgets.find((widget) => widget.text === 'Today')
+  const first = widgets.find((widget) => widget.text === 'A')
+  assert.ok(heading.y < first.y, 'the heading sits above its day')
+  assert.equal(heading.align_h, 'CENTER_H', 'day headings are centred')
+
+  // Within a day the recordings run earliest to latest, so the day reads the
+  // way it was worked — B ran at 7, A at 9.
+  const second = widgets.find((widget) => widget.text === 'B')
+  assert.ok(second.y < first.y, 'the earlier recording comes first')
+
+  const subtitle = widgets.find((widget) => /^\d{1,2}:\d{2}-/.test(String(widget.text ?? '')))
+  assert.equal(heading.color, subtitle.color, 'the heading shares the subtitle colour')
+  assert.ok(heading.text_size > subtitle.text_size, 'and is a touch bigger')
+
+  // The third recording is two days back, so it gets its own heading below.
+  const third = widgets.find((widget) => widget.text === 'C')
+  const headings = widgets.filter((widget) => widget.align_h === 'CENTER_H' && widget.y < third.y)
+  assert.ok(headings.length >= 2, 'each tracked day heads its own group')
+})
+
+/**
+ * The failure that shipped: a reply cached by an earlier build carried the day
+ * inside its subtitle and no day field at all, so nothing grouped and the
+ * times were missing — for the six hours that cache stays alive. The watch
+ * words its own rows from the raw start and duration, so an old reply renders
+ * as the current build draws it.
+ */
+test('the days stay newest first, while each day runs earliest to latest', async () => {
+  // Arrives newest first, the way Toggl and the phone cache hold it.
+  const page = await makePage({
+    status: {
+      ...SAVED,
+      presets: [
+        recording('today late', 0, 16),
+        recording('today early', 0, 8),
+        recording('friday late', 3, 17),
+        recording('friday early', 3, 9)
+      ]
+    }
+  })
+  const widgets = await drawn(page)
+  const order = widgets
+    .filter((widget) => /^(today|friday) (early|late)$/.test(String(widget.text ?? '')))
+    .map((widget) => widget.text)
+
+  assert.deepEqual(order, ['today early', 'today late', 'friday early', 'friday late'])
+})
+
+test('a reply from an older build still groups and shows its times', async () => {
+  const stale = {
+    ...recording('Jairus', 1, 9, 3 * 3600 + 3 * 60),
+    // Exactly what the device drew: last version's wording, no day field.
+    subtitle: 'Yesterday · 3h 3m'
+  }
+  delete stale.day
+
+  const page = await makePage({ status: { ...SAVED, presets: [stale] } })
+  const labels = texts(await drawn(page))
+
+  assert.ok(labels.includes('Yesterday'), 'the row is grouped under a day heading it never carried')
+  assert.ok(
+    labels.some((text) => /^9:00-12:03 · 3h 3m/.test(text)),
+    `the times are drawn from the raw stamps, got ${JSON.stringify(labels)}`
+  )
+  assert.ok(!labels.includes('Yesterday · 3h 3m'), 'the old wording is not what gets drawn')
+})
+
+test('the background covers a list that scrolls past the panel', async () => {
+  const week = Array.from({ length: 10 }, (_, index) => recording(`Job ${index}`, index, 9))
+  const page = await makePage({ status: { ...SAVED, presets: week } })
+  const widgets = await drawn(page)
+
+  const background = widgets[0]
+  const lowest = Math.max(...widgets.map((widget) => widget.y + widget.h))
+  assert.equal(background.type, 'FILL_RECT', 'the background is drawn first')
+  assert.ok(
+    background.h >= lowest,
+    `the background stops at ${background.h} with content reaching ${lowest}`
+  )
+
+  // And the last row is not flush against the end of the scroll.
+  const rows = widgets.filter((widget) => widget.type === 'BUTTON')
+  const lastRow = rows[rows.length - 1]
+  assert.ok(
+    background.h - (lastRow.y + lastRow.h) >= 40,
+    'there should be padding below the last entry'
+  )
+})
+
+test('every recording carries a play mark, which is not a second control', async () => {
+  const page = await makePage({ status: { ...SAVED, presets: [recording('A', 0, 9)] } })
+  const widgets = await drawn(page)
+
+  const icons = widgets.filter((widget) => widget.type === 'IMG')
+  assert.equal(icons.length, 1, 'one mark per recording')
+  assert.match(String(icons[0].src), /play/)
+  assert.equal(icons[0].click_func, undefined, 'the mark is decoration; the row takes the tap')
+
+  // It sits at the right-hand end of the row, clear of the text.
+  const row = widgets.find((widget) => widget.type === 'BUTTON')
+  const label = widgets.find((widget) => widget.text === 'A')
+  assert.ok(icons[0].x > label.x + label.w, 'the text stops before the mark')
+  assert.ok(icons[0].x + icons[0].w <= row.x + row.w, 'and the mark stays inside the row')
+})
+
+test('tapping a recording starts that job', async () => {
+  const page = await makePage({ status: SAVED })
+  const sent = []
+  page.request = (payload) => {
+    sent.push(payload)
+    return new Promise(() => {})
+  }
+
+  const widgets = await drawn(page)
+  const rows = widgets.filter((widget) => widget.type === 'BUTTON' && widget.text === '')
+  assert.ok(rows.length >= 1, 'the recording should be drawn as a tappable row')
+
+  rows[0].click_func()
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].method, 'START')
+  assert.equal(sent[0].params.description, 'Deep work')
+})
+
+test('the week of history draws one row per recording, duplicates included', async () => {
+  const twice = [
+    { description: 'Deep work', label: 'Deep work', subtitle: 'Today · 1h 20m · WristTrack', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'a' },
+    { description: 'Deep work', label: 'Deep work', subtitle: 'Mon · 2h · WristTrack', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'b' }
+  ]
+  const page = await makePage({ status: { ...SAVED, presets: twice } })
+  const labels = texts(await drawn(page))
+
+  assert.equal(labels.filter((text) => text === 'Deep work').length, 2, 'both recordings are rows')
+  assert.ok(labels.includes('Today · 1h 20m · WristTrack'))
+  assert.ok(labels.includes('Mon · 2h · WristTrack'))
 })
 
 test('polling stops once the app has been left alone', async () => {

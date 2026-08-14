@@ -31,7 +31,11 @@ for (const scenario of SCENARIOS) {
       assert.ok(item.x >= 0, `${label} starts left of the panel (x=${item.x})`)
       assert.ok(item.y >= 0, `${label} starts above the panel (y=${item.y})`)
       assert.ok(item.x + item.w <= PANEL.width, `${label} runs past the right edge`)
-      assert.ok(item.y + item.h <= PANEL.height, `${label} runs past the bottom edge`)
+      // A scrolling screen is allowed to run past the bottom: that is what
+      // the platform's vertical page scroll exists to reach.
+      if (!scenario.scrolls) {
+        assert.ok(item.y + item.h <= PANEL.height, `${label} runs past the bottom edge`)
+      }
     }
   })
 
@@ -39,6 +43,10 @@ for (const scenario of SCENARIOS) {
     const widgets = await renderScenario(makePage, scenario)
     // The background fill is deliberately full-bleed.
     for (const item of widgets.filter((w) => w.w < PANEL.width)) {
+      // On a scrolling screen anything at or past the bottom corner zone is
+      // mid-list: it clips while passing through and clears once scrolled,
+      // so only the resting top of the layout is held to the corner rule.
+      if (scenario.scrolls && item.y + item.h > PANEL.height - CORNER_RADIUS) continue
       const inset = Math.max(cornerInset(item.y), cornerInset(item.y + item.h))
       const label = `${item.type} ${JSON.stringify(item.text ?? '')}`
       assert.ok(item.x >= inset, `${label} overlaps a corner (x=${item.x}, needs ${Math.ceil(inset)})`)
@@ -70,13 +78,22 @@ test('every screen offers a way forward', async () => {
   }
 })
 
-test('the running screen shows a live elapsed time', async () => {
+test('the running screen shows a live elapsed time, above the history', async () => {
   const widgets = await renderScenario(makePage, SCENARIOS.find((s) => s.name === '06-running'))
-  const clock = widgets.find((w) => /^\d{2}:\d{2}:\d{2}$/.test(String(w.text ?? '')))
+  const clock = widgets.find((w) => /^\d+:\d{2}:\d{2}$/.test(String(w.text ?? '')))
   assert.ok(clock, 'no HH:MM:SS readout on the running screen')
 
-  // Relative, not an absolute size: the layout may trade clock size for other
-  // content, but the elapsed time must stay the largest thing on the screen.
-  const biggest = Math.max(...widgets.filter((w) => w.text_size).map((w) => w.text_size))
-  assert.equal(clock.text_size, biggest, 'the elapsed time is not the focal point')
+  // The running entry is a row like the others now, so the clock is no longer
+  // the biggest thing on screen — but it is the topmost row, and the only one
+  // wearing the stop mark.
+  const rows = widgets.filter((w) => w.type === 'BUTTON')
+  assert.ok(rows.length > 1, 'the history is still listed while a timer runs')
+  assert.ok(clock.y < rows[1].y, 'the live entry leads the list')
+
+  const stops = widgets.filter((w) => w.type === 'IMG' && /stop/.test(String(w.src)))
+  assert.equal(stops.length, 1, 'exactly one row offers to stop')
+  assert.ok(
+    widgets.some((w) => w.type === 'IMG' && /play/.test(String(w.src))),
+    'the rest still offer to start'
+  )
 })

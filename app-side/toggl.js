@@ -1,3 +1,11 @@
+import {
+  NO_PROJECT,
+  historyDay,
+  historySubtitle,
+  presetLabel,
+  presetSubtitle
+} from '../shared/history.js'
+
 const API_ROOT = 'https://api.track.toggl.com/api/v9'
 const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
@@ -74,29 +82,24 @@ export function recentEntriesPath(now = Date.now(), days = HISTORY_DAYS) {
   )
 }
 
-const NO_PROJECT = 'No project'
-const NO_DESCRIPTION = 'No description'
-
 /**
- * Toggl entries very often have no description — the project alone is the
- * label. Keep the real description for the API and show something readable.
+ * How a recording is worded lives in shared/history.js, because the watch
+ * renders these itself rather than trusting the strings in a reply — a cache
+ * outlives the build that wrote it. Re-exported so the phone side and the
+ * tests keep one import for the Toggl layer.
  */
-export function presetLabel(description, projectName) {
-  if (description) return description
-  if (projectName && projectName !== NO_PROJECT) return projectName
-  return NO_DESCRIPTION
-}
-
-/**
- * Second line of the card. When the label already fell back to the project,
- * repeating it would read as "Home Maintenance / Home Maintenance", so say
- * what is actually missing instead.
- */
-export function presetSubtitle(description, projectName) {
-  if (description) return projectName || NO_PROJECT
-  if (projectName && projectName !== NO_PROJECT) return NO_DESCRIPTION
-  return NO_PROJECT
-}
+export {
+  NO_PROJECT,
+  NO_DESCRIPTION,
+  parseStart,
+  formatDuration,
+  clockLabel,
+  dayLabel,
+  presetLabel,
+  presetSubtitle,
+  historyDay,
+  historySubtitle
+} from '../shared/history.js'
 
 /**
  * The one line under the running clock. "Job · Project" when both exist, and
@@ -167,48 +170,48 @@ export function reduceAccount(me) {
   }
 }
 
-export const PRESET_LIMIT = 5
+// Caps what crosses Bluetooth and what the watch stores, not what Toggl is
+// asked for: a busy month can outgrow it, in which case the oldest rows are
+// the ones that fall off.
+export const HISTORY_LIMIT = 50
 
 /**
- * The watch offers the five most recent distinct entries, newest first. Toggl
- * returns /me/time_entries newest first already. The configured default is
- * only used as a fallback when the account has no history to draw on, so a
- * fresh account still has something to start.
+ * The watch shows the past month of recordings, newest first, the way Toggl
+ * already returns /me/time_entries. Each row is one recording, duplicates and
+ * all — the list is a history, not a menu of distinct jobs — and tapping one
+ * starts that job again. The configured default is only used as a fallback
+ * when the account has no history to draw on, so a fresh account still has
+ * something to start.
  */
-export function buildPresets(entries, account, settings) {
+export function buildHistory(entries, account, settings, now = Date.now()) {
   const workspaceId = Number(settings.workspaceId || account.defaultWorkspaceId)
   const projectsById = Object.fromEntries(account.projects.map((project) => [project.id, project]))
 
-  const recent = asArray(entries)
-    // Skip deleted entries, and the running one: it is already on screen and
-    // offering it as something to switch to is meaningless.
+  const history = asArray(entries)
+    // Skip deleted entries, and the running one: it is on the card already,
+    // and its recording is not finished.
     .filter((entry) => !entry.server_deleted_at && !(Number(entry.duration) < 0))
     .map((entry) => {
       const projectId = entry.project_id || entry.pid || null
       const projectName =
         entry.project_name || (projectsById[projectId] && projectsById[projectId].name) || NO_PROJECT
       const description = String(entry.description || '').trim()
-      return {
+      const item = {
         description,
         label: presetLabel(description, projectName),
-        subtitle: presetSubtitle(description, projectName),
         projectId,
         projectName,
-        workspaceId: entry.workspace_id || entry.wid || workspaceId
+        workspaceId: entry.workspace_id || entry.wid || workspaceId,
+        start: entry.start,
+        duration: Number(entry.duration) || 0
       }
+      item.day = historyDay(item, now)
+      item.subtitle = historySubtitle(item, now)
+      return item
     })
+    .slice(0, HISTORY_LIMIT)
 
-  const seen = {}
-  const presets = recent
-    .filter((candidate) => {
-      const key = `${candidate.workspaceId}:${candidate.projectId || 0}:${candidate.description}`
-      if (seen[key]) return false
-      seen[key] = true
-      return true
-    })
-    .slice(0, PRESET_LIMIT)
-
-  if (presets.length > 0) return presets
+  if (history.length > 0) return history
 
   const defaultProject = projectsById[Number(settings.projectId)]
   const description = String(settings.description || 'Working').trim() || 'Working'

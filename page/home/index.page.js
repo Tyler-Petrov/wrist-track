@@ -3,6 +3,7 @@ import { setInterval, clearInterval, setTimeout, clearTimeout } from '@zos/timer
 import { localStorage } from '@zos/storage'
 import { BasePage } from '@zeppos/zml/base-page'
 import { COLORS, CONTENT_WIDTH, GUTTER, SCREEN, u, x, y } from './theme'
+import { historyDay, historySubtitle, parseStart } from '../../shared/history'
 
 // The watch keeps its own copy of the last screen it drew, so opening the app
 // shows the timer immediately instead of a spinner while the phone is asked.
@@ -42,9 +43,25 @@ const ROW_HEIGHT = 78
 const EDGE = 26
 const ROW_WIDTH = 432 - EDGE * 2
 
-// The list shows this many jobs at once; anything further back is reached
-// with the compact pager that only appears when it is needed.
-const VISIBLE_ROWS = 3
+// The history draws every recording as a row and relies on the platform's
+// native vertical page scroll to reach the ones past the panel; the rows are
+// laid out from this baseline on a fixed pitch.
+const LIST_TOP = 68
+const ROW_PITCH = 88
+
+// Breathing room between one day's last recording and the next day's heading.
+const DAY_GAP = 14
+const DAY_HEADING_HEIGHT = 38
+
+// Clear space under the last row. Without it the final entry sits against the
+// bottom of the scroll, where the panel's corners cut into it.
+const LIST_BOTTOM_PAD = 56
+
+// The mark each row carries, drawn at its natural size from the asset: play
+// to start that job, stop to end the one running.
+const PLAY_ICON = 'play.png'
+const STOP_ICON = 'stop.png'
+const ICON_SIZE = 26
 
 // The main action sits at the same height on every screen so it stays under
 // the thumb.
@@ -101,13 +118,11 @@ Page(
   BasePage({
     state: {
       status: null,
-      presetIndex: 0,
       widgets: [],
       timerWidget: null,
       interval: null,
       reading: false,
       acting: false,
-      mode: 'view',
       error: '',
       mounted: false,
       requestGeneration: 0,
@@ -247,41 +262,119 @@ Page(
      * drawn over it — Zepp text widgets do not take touches, so the button
      * underneath still receives them.
      */
-    jobRow(item, top, { selected = false, onClick } = {}) {
+    jobRow(
+      item,
+      top,
+      {
+        onClick,
+        subtitle,
+        icon = PLAY_ICON,
+        color = COLORS.surface,
+        pressed = COLORS.surfacePressed,
+        labelColor = 0xf2e6f6,
+        subtitleColor = COLORS.muted
+      } = {}
+    ) {
       this.button({
         label: '',
         top,
         height: ROW_HEIGHT,
         radius: ROW_RADIUS,
-        color: selected ? COLORS.surfaceRaised : COLORS.surface,
-        pressed: COLORS.surfacePressed,
+        color,
+        pressed,
         onClick
       })
-      if (selected) {
-        this.add(hmUI.widget.FILL_RECT, {
-          x: x(EDGE),
-          y: y(top + 10),
-          w: u(6),
-          h: u(ROW_HEIGHT - 20),
-          radius: u(3),
-          color: COLORS.accent
-        })
-      }
+      // Text and icon are drawn over the button rather than in it: Zepp text
+      // and image widgets do not take touches, so the whole row stays one tap
+      // target and the mark is decoration, not a second control.
+      const textWidth = ROW_WIDTH - 40 - ICON_SIZE - 12
       this.line(item.label || item.description, {
         left: EDGE + 22,
         top: top + 12,
-        width: ROW_WIDTH - 40,
+        width: textWidth,
         height: 28,
         size: 22,
-        color: selected ? COLORS.text : 0xf2e6f6
+        color: labelColor
       })
-      this.line(item.subtitle || item.projectName, {
+      const second = this.line(subtitle || item.subtitle || item.projectName, {
         left: EDGE + 22,
         top: top + 42,
-        width: ROW_WIDTH - 40,
+        width: textWidth,
         height: 24,
         size: 16,
-        color: selected ? 0xc3a8cd : COLORS.muted
+        color: subtitleColor
+      })
+      this.add(hmUI.widget.IMG, {
+        x: x(EDGE + ROW_WIDTH - 22 - ICON_SIZE),
+        y: y(top + Math.round((ROW_HEIGHT - ICON_SIZE) / 2)),
+        w: u(ICON_SIZE),
+        h: u(ICON_SIZE),
+        src: icon
+      })
+      // Handed back so the running row can keep its clock ticking.
+      return second
+    },
+
+    /**
+     * Where every row and day heading sits. Drawing and measuring walk the
+     * same plan, so the background cannot end up shorter than the list.
+     *
+     * The days run newest first, the way the reply arrives, but each day's
+     * recordings run earliest to latest — a day reads as the day was worked.
+     * Sorting here rather than on the phone leaves the cache newest-first,
+     * which is what promoting a finished run to the top of it relies on.
+     */
+    planList(items, from) {
+      const groups = []
+      let currentDay = null
+      ;(items || []).forEach((item) => {
+        const day = this.dayOf(item)
+        // A row with no usable day joins whatever group it arrived in rather
+        // than starting one, so a heading is never repeated.
+        if (!groups.length || (day && day !== currentDay)) {
+          groups.push({ day, items: [] })
+          currentDay = day || currentDay
+        }
+        groups[groups.length - 1].items.push(item)
+      })
+
+      const steps = []
+      let top = from
+      groups.forEach((group, index) => {
+        if (group.day) {
+          if (index > 0) top += DAY_GAP
+          steps.push({ heading: group.day, top })
+          top += DAY_HEADING_HEIGHT
+        }
+        this.byStart(group.items).forEach((item) => {
+          steps.push({ item, top })
+          top += ROW_PITCH
+        })
+      })
+      return { steps, bottom: top }
+    },
+
+    /** Earliest first, with anything undateable left at the end in order. */
+    byStart(items) {
+      return items
+        .map((item, index) => ({ item, index, at: parseStart(item.start) }))
+        .sort((a, b) => {
+          if (a.at === b.at) return a.index - b.index
+          if (a.at === null) return 1
+          if (b.at === null) return -1
+          return a.at - b.at
+        })
+        .map((entry) => entry.item)
+    },
+
+    /** Draws a plan; every row starts the job it names. */
+    drawList(steps, onPick) {
+      steps.forEach((step) => {
+        if (step.heading) return this.text(step.heading, step.top, 28, 19, COLORS.muted)
+        this.jobRow(step.item, step.top, {
+          subtitle: this.subtitleOf(step.item),
+          onClick: () => onPick(step.item)
+        })
       })
     },
     // ---- screens ------------------------------------------------------------
@@ -290,11 +383,13 @@ Page(
       if (!this.state.mounted) return
       this.clear()
 
+      // Tall enough to cover a scrolling list, or the page scrolls the rows
+      // off the painted area and the bare panel shows through beneath them.
       this.add(hmUI.widget.FILL_RECT, {
         x: 0,
         y: 0,
         w: SCREEN.width,
-        h: SCREEN.height,
+        h: Math.max(SCREEN.height, u(this.contentHeight())),
         color: COLORS.background
       })
 
@@ -307,11 +402,7 @@ Page(
           'Check again'
         )
       }
-      const running = this.state.status.running
-      if (running) {
-        return this.state.mode === 'edit' ? this.renderEdit(running) : this.renderRunning(running)
-      }
-      return this.renderReady()
+      return this.renderHistory()
     },
 
     /**
@@ -341,188 +432,113 @@ Page(
       this.primaryButton(action, PRIMARY_TOP, () => this.loadStatus())
     },
 
-    /** The live entry as a filled card, with the next jobs one tap away. */
-    renderRunning(running) {
-      // With nothing to switch to, the card grows into the space the job rows
-      // would have used rather than leaving a void above STOP.
-      const others = (this.state.status.presets || []).slice(0, 2)
-      const tall = others.length === 0
-      const cardHeight = tall ? 216 : 132
-
-      // Above the card rather than on it: the clock below may have kept
-      // ticking past a stop made somewhere else.
-      const note = this.statusNote()
-      if (note) this.text(note, 24, 26, 15, COLORS.dim)
-
-      this.button({
-        label: '',
-        top: 56,
-        height: cardHeight,
-        radius: 22,
-        color: this.state.acting ? COLORS.accentPressed : COLORS.accent,
-        pressed: COLORS.accentPressed,
-        onClick: () => this.startEdit()
-      })
-      this.line('Running', {
-        left: EDGE + 18,
-        top: 70,
-        width: ROW_WIDTH - 36,
-        height: 24,
-        size: 17,
-        color: COLORS.onAccentEyebrow
-      })
-      this.state.timerWidget = this.line(formatElapsed(running.start), {
-        left: EDGE + 18,
-        top: tall ? 118 : 96,
-        width: ROW_WIDTH - 36,
-        height: tall ? 76 : 56,
-        size: tall ? 62 : 46,
-        color: COLORS.onAccent
-      })
-      this.state.interval = setInterval(() => {
-        if (this.state.timerWidget) {
-          this.state.timerWidget.setProperty(hmUI.prop.TEXT, formatElapsed(running.start))
-        }
-      }, 1000)
-      this.line(running.summary || running.label || running.description, {
-        left: EDGE + 18,
-        top: tall ? 214 : 152,
-        width: ROW_WIDTH - 36,
-        height: 26,
-        size: 18,
-        color: COLORS.onAccentMuted
-      })
-
-      // Tapping a job below switches the running entry to it.
-      others.forEach((preset, index) => {
-        this.jobRow(preset, 200 + index * 80, { onClick: () => this.applyEdit(running, preset) })
-      })
-
-      this.button({
-        label: this.state.acting ? 'Stopping' : 'Stop timer',
-        top: PRIMARY_TOP,
-        height: 92,
-        color: COLORS.deep,
-        pressed: COLORS.deepPressed,
-        textColor: COLORS.accent,
-        onClick: () => this.stop()
-      })
-    },
-
-    renderReady() {
+    /**
+     * One page: the month of history as rows, with the running entry
+     * conditionally at the top of it.
+     *
+     * The live row is the same size and shape as the rest, but wears the
+     * accent the old card had, so what is running reads at a glance without
+     * being a screen of its own. A tap on it stops the timer, which is what
+     * its stop mark says; a tap on any row below starts that job, or switches
+     * the running entry to it when one is already going.
+     */
+    renderHistory() {
+      const running = this.state.status.running
       const presets = this.state.status.presets || []
-      const window = this.visibleWindow(presets)
 
       const note = this.statusNote()
-      this.text(note ? `Pick a job · ${note.toLowerCase()}` : 'Pick a job', 30, 26, 18, COLORS.muted)
+      const busy = this.state.acting ? (running ? 'Stopping' : 'Starting') : ''
+      const lead = running ? 'Tracking · tap to stop' : 'This month · tap to start'
+      this.text(
+        busy || (note ? `${lead.split(' · ')[0]} · ${note.toLowerCase()}` : lead),
+        30,
+        26,
+        18,
+        this.state.acting ? COLORS.accent : COLORS.muted
+      )
+
+      let top = LIST_TOP
+      if (running) {
+        // The clock is the second line, ticking in place.
+        this.state.timerWidget = this.jobRow(running, top, {
+          subtitle: formatElapsed(running.start),
+          icon: STOP_ICON,
+          color: this.state.acting ? COLORS.accentPressed : COLORS.accent,
+          pressed: COLORS.accentPressed,
+          labelColor: COLORS.onAccent,
+          subtitleColor: COLORS.onAccentMuted,
+          onClick: () => this.stop()
+        })
+        this.state.interval = setInterval(() => {
+          if (this.state.timerWidget) {
+            this.state.timerWidget.setProperty(hmUI.prop.TEXT, formatElapsed(running.start))
+          }
+        }, 1000)
+        top += ROW_PITCH + DAY_GAP
+      }
 
       if (presets.length === 0) {
+        if (running) return
         this.panel(90, 120, COLORS.surface)
         this.text('Nothing tracked yet', 118, 34, 24, COLORS.text)
         this.text('Start one from Toggl first', 152, 28, 18, COLORS.muted)
         return
       }
 
-      window.forEach((preset, index) => {
-        this.jobRow(preset, 68 + index * 88, {
-          selected: presets.indexOf(preset) === this.state.presetIndex,
-          onClick: () => this.selectPreset(presets.indexOf(preset))
-        })
-      })
-
-      if (presets.length > VISIBLE_ROWS) {
-        this.button({
-          label: '‹',
-          top: 336,
-          height: 40,
-          left: EDGE,
-          width: 104,
-          size: 22,
-          radius: 14,
-          color: COLORS.surface,
-          pressed: COLORS.surfacePressed,
-          onClick: () => this.movePreset(-1)
-        })
-        this.line(`${this.state.presetIndex + 1} of ${presets.length}`, {
-          left: EDGE + 116,
-          top: 336,
-          width: ROW_WIDTH - 232,
-          height: 40,
-          size: 17,
-          color: COLORS.dim
-        })
-        this.button({
-          label: '›',
-          top: 336,
-          height: 40,
-          left: 432 - EDGE - 104,
-          width: 104,
-          size: 22,
-          radius: 14,
-          color: COLORS.surface,
-          pressed: COLORS.surfacePressed,
-          onClick: () => this.movePreset(1)
-        })
-      }
-
-      const selected = presets[this.state.presetIndex] || presets[0]
-      this.primaryButton(this.state.acting ? 'Starting' : 'Start timer', PRIMARY_TOP, () =>
-        this.start(selected)
-      )
+      // Grouped under day headings. The list arrives newest first, so each
+      // day's recordings are already contiguous; a day with nothing tracked
+      // simply never comes up. Rows with no usable start — the
+      // configured-default fallback — draw ungrouped.
+      const { steps } = this.planList(presets, top)
+      this.drawList(steps, (preset) => (running ? this.switchTo(running, preset) : this.start(preset)))
     },
 
-    /** Keeps the selected job inside the three visible rows. */
-    visibleWindow(presets) {
-      if (presets.length <= VISIBLE_ROWS) return presets
-      const first = Math.min(
-        Math.max(0, this.state.presetIndex - 1),
-        presets.length - VISIBLE_ROWS
-      )
-      return presets.slice(first, first + VISIBLE_ROWS)
+    /**
+     * How a row is worded is decided here, not taken from the reply.
+     *
+     * A reply outlives the build that wrote it — the phone keeps its copy for
+     * six hours and the watch keeps its own across launches — so an update
+     * that changes the wording would otherwise show the previous version's
+     * until those caches turned over. It is also the only way "Today" stays
+     * right: computed on the phone before midnight, it is wrong by morning.
+     * The raw start and duration are what travel; the words are drawn from
+     * them, and only a reply too old to carry them falls back to its own.
+     */
+    dayOf(item) {
+      return historyDay(item) || item.day || null
+    },
+    subtitleOf(item) {
+      // historyDay answers only when the raw start and duration are both
+      // usable, which is exactly when the wording can be rebuilt. Without
+      // them the reply's own line is the better answer, not a worse one
+      // computed from nothing.
+      return historyDay(item) ? historySubtitle(item) : item.subtitle || item.projectName
     },
 
-    /** Re-labels the running entry from the full recent list. */
-    renderEdit(running) {
+    /** How far the drawn screen reaches, so the background can cover it. */
+    contentHeight() {
+      if (this.state.error || !this.state.status || !this.state.status.configured) return SCREEN.height
       const presets = this.state.status.presets || []
-      const window = this.visibleWindow(presets)
-
-      this.text('Change to', 30, 26, 18, COLORS.accent)
-
-      if (presets.length === 0) {
-        this.panel(90, 120, COLORS.surface)
-        this.text('No other jobs', 118, 34, 24, COLORS.text)
-        this.text('Track something else first', 152, 28, 18, COLORS.muted)
-      } else {
-        window.forEach((preset, index) => {
-          this.jobRow(preset, 68 + index * 88, {
-            selected: presets.indexOf(preset) === this.state.presetIndex,
-            onClick: () => this.applyEdit(running, preset)
-          })
-        })
-      }
-
-      this.button({
-        label: 'Cancel',
-        top: PRIMARY_TOP,
-        height: 92,
-        color: COLORS.surface,
-        pressed: COLORS.surfacePressed,
-        onClick: () => this.cancelEdit()
-      })
+      // The running row sits above the list and pushes it down by its own
+      // height; measuring walks the same plan drawing does.
+      const from = this.state.status.running ? LIST_TOP + ROW_PITCH + DAY_GAP : LIST_TOP
+      const { bottom } = this.planList(presets, from)
+      return Math.max(SCREEN.height, bottom + LIST_BOTTOM_PAD)
     },
 
-    startEdit() {
-      if (this.state.acting) return
-      this.touch()
-      this.state.mode = 'edit'
-      this.state.presetIndex = 0
-      this.render()
-    },
-    cancelEdit() {
-      if (this.state.acting) return
-      this.touch()
-      this.state.mode = 'view'
-      this.render()
+    /**
+     * Switches the running entry to another job. The history now includes the
+     * running job's own past recordings, so a tap can name what is already
+     * running — which Toggl would accept and nothing would change, at the cost
+     * of a request from an allowance worth guarding.
+     */
+    switchTo(running, preset) {
+      const same =
+        String(preset.workspaceId) === String(running.workspaceId) &&
+        String(preset.projectId || 0) === String(running.projectId || 0) &&
+        preset.description === running.description
+      if (same) return
+      this.applyEdit(running, preset)
     },
     applyEdit(running, preset) {
       this.run(
@@ -540,21 +556,8 @@ Page(
             projectName: preset.projectName
           }
         },
-        { acting: true, thenMode: 'view' }
+        { acting: true }
       )
-    },
-
-    selectPreset(index) {
-      if (this.state.acting || index < 0) return
-      this.touch()
-      this.state.presetIndex = index
-      this.render()
-    },
-    movePreset(direction) {
-      this.touch()
-      const length = this.state.status.presets.length
-      this.state.presetIndex = (this.state.presetIndex + direction + length) % length
-      this.render()
     },
 
     // ---- side-service calls -------------------------------------------------
@@ -568,7 +571,7 @@ Page(
      * actions may not overlap — the phone refuses that anyway — and a second
      * status read while one is in flight is simply redundant.
      */
-    run(payload, { acting, thenMode } = {}) {
+    run(payload, { acting } = {}) {
       if (this.state.acting) return
       if (!acting && this.state.reading) return
       this.touch()
@@ -598,9 +601,7 @@ Page(
           this.state.signature = result.signature || ''
           this.state.stale = Boolean(result.stale)
           this.state.checking = false
-          this.state.presetIndex = 0
           this.state.error = ''
-          if (thenMode) this.state.mode = thenMode
           this.saveStatus(result)
           this.schedulePoll(result.nextPollMs)
         })
@@ -702,8 +703,8 @@ Page(
      */
     refresh() {
       if (!this.state.mounted) return
-      // Mid-action or mid-choice, come back later rather than move things.
-      if (this.state.acting || this.state.reading || this.state.mode === 'edit') {
+      // Mid-action, come back later rather than move things under a thumb.
+      if (this.state.acting || this.state.reading) {
         return this.schedulePoll(POLL_FALLBACK_MS)
       }
 
@@ -735,7 +736,6 @@ Page(
           this.saveStatus(result)
           if (changed) {
             // Something moved elsewhere — Toggl on the phone, or the web app.
-            if (this.state.presetIndex >= (result.presets || []).length) this.state.presetIndex = 0
             this.render()
           }
           this.schedulePoll(result.nextPollMs)
@@ -747,7 +747,7 @@ Page(
     },
 
     loadStatus() {
-      this.run({ method: 'GET_STATUS' }, { thenMode: 'view' })
+      this.run({ method: 'GET_STATUS' })
     },
     start(preset) {
       this.run({ method: 'START', params: preset }, { acting: true })

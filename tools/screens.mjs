@@ -4,7 +4,22 @@
 import { register } from 'node:module'
 register('./loader.mjs', import.meta.url)
 
-const RUNNING_START = '2026-07-30T18:41:07+00:00'
+// Relative to now, so the elapsed clock reads 01:23:45 whenever the screens
+// are rendered. A fixed date here once aged past 100 hours, at which point
+// the clock grew a third digit and failed the HH:MM:SS layout check.
+const RUNNING_START = new Date(Date.now() - (1 * 3600 + 23 * 60 + 45) * 1000).toISOString()
+
+/**
+ * Recordings are dated relative to now for the same reason: the watch works
+ * out "Today" and "Yesterday" as it draws, so fixed stamps would render as
+ * bare dates and the day headings would stop showing what they look like.
+ */
+function daysAgoAt(days, hour, minute = 0) {
+  const when = new Date()
+  when.setDate(when.getDate() - days)
+  when.setHours(hour, minute, 0, 0)
+  return when.toISOString()
+}
 
 export const SCENARIOS = [
   {
@@ -28,6 +43,7 @@ export const SCENARIOS = [
     title: 'Restored on launch',
     description:
       'Every launch after the first: the watch draws its saved screen immediately and marks it unconfirmed until the phone answers, usually within a second.',
+    scrolls: true,
     state: {
       checking: true,
       status: {
@@ -45,8 +61,8 @@ export const SCENARIOS = [
           start: RUNNING_START
         },
         presets: [
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Admin', projectName: 'Admin', projectId: 22, workspaceId: 10 }
+          { description: 'Client call', label: 'Client call', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: daysAgoAt(1, 15), duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', projectName: 'Admin', projectId: 22, workspaceId: 10, start: daysAgoAt(3, 11), duration: 1500 }
         ]
       },
       error: ''
@@ -61,35 +77,21 @@ export const SCENARIOS = [
   {
     name: '03-ready',
     title: 'Ready',
-    description: 'Connected, no timer running, several presets to page through.',
+    description:
+      'Connected, no timer running, the past month of recordings as a scrolling list. A tap starts that job again.',
+    scrolls: true,
     state: {
       status: {
         configured: true,
         userName: 'Tyler Petrov',
         running: null,
         presets: [
-          { description: 'Deep work', label: 'Deep work', subtitle: 'WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10 },
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'No project', projectName: 'No project', projectId: null, workspaceId: 10 }
-        ]
-      },
-      error: ''
-    }
-  },
-  {
-    name: '04-ready-second-preset',
-    title: 'Ready, second preset',
-    description: 'After pressing the right arrow once.',
-    state: {
-      presetIndex: 1,
-      status: {
-        configured: true,
-        userName: 'Tyler Petrov',
-        running: null,
-        presets: [
-          { description: 'Deep work', label: 'Deep work', subtitle: 'WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10 },
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'No project', projectName: 'No project', projectId: null, workspaceId: 10 }
+          { description: 'Deep work', label: 'Deep work', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: daysAgoAt(0, 9), duration: 4800 },
+          { description: 'Client call', label: 'Client call', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: daysAgoAt(1, 15), duration: 2700 },
+          { description: 'Deep work', label: 'Deep work', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: daysAgoAt(1, 8, 30), duration: 5400 },
+          { description: 'Invoicing', label: 'Invoicing', projectName: 'No project', projectId: null, workspaceId: 10, start: daysAgoAt(3, 11), duration: 1500 },
+          { description: '', label: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: daysAgoAt(4, 14), duration: 3900 },
+          { description: 'Deep work', label: 'Deep work', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: daysAgoAt(21, 9, 15), duration: 7200 }
         ]
       },
       error: ''
@@ -105,8 +107,8 @@ export const SCENARIOS = [
         userName: 'Tyler Petrov',
         running: null,
         presets: [
-          { description: '', label: 'Home Maintenance', subtitle: 'No description', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: '', label: 'No description', subtitle: 'No project', projectName: 'No project', projectId: null, workspaceId: 10 }
+          { description: '', label: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: daysAgoAt(0, 8), duration: 3900 },
+          { description: '', label: 'No description', projectName: 'No project', projectId: null, workspaceId: 10, start: daysAgoAt(2, 10), duration: 1200 }
         ]
       },
       error: ''
@@ -115,14 +117,14 @@ export const SCENARIOS = [
   {
     name: '05-starting',
     title: 'Starting',
-    description: 'START TIMER pressed, waiting on Toggl.',
+    description: 'A recording tapped, waiting on Toggl.',
     state: {
       acting: true,
       status: {
         configured: true,
         userName: 'Tyler Petrov',
         running: null,
-        presets: [{ description: 'Deep work', label: 'Deep work', subtitle: 'WristTrack', projectName: 'WristTrack', projectId: 20, workspaceId: 10 }]
+        presets: [{ description: 'Deep work', label: 'Deep work', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: daysAgoAt(0, 9), duration: 4800 }]
       },
       error: ''
     }
@@ -130,7 +132,9 @@ export const SCENARIOS = [
   {
     name: '06-running',
     title: 'Running',
-    description: 'A timer is running; the elapsed time ticks once a second.',
+    description:
+      'A timer is running. The live entry is a row like the others, with a stop mark and the elapsed time ticking once a second; the history stays on screen below it, and tapping a row switches the running timer to that job without resetting the clock.',
+    scrolls: true,
     state: {
       status: {
         configured: true,
@@ -146,35 +150,9 @@ export const SCENARIOS = [
           start: RUNNING_START
         },
         presets: [
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Admin', projectName: 'Admin', projectId: 22, workspaceId: 10 }
-        ]
-      },
-      error: ''
-    }
-  },
-  {
-    name: '06b-edit-running',
-    title: 'Edit a running timer',
-    description: 'EDIT on the running screen re-labels the entry from your recent list.',
-    state: {
-      mode: 'edit',
-      status: {
-        configured: true,
-        userName: 'Tyler Petrov',
-        running: {
-          id: 4242,
-          workspaceId: 10,
-          description: 'Deep work',
-          label: 'Deep work',
-          subtitle: 'WristTrack',
-          summary: 'Deep work · WristTrack',
-          projectName: 'WristTrack',
-          start: RUNNING_START
-        },
-        presets: [
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'No project', projectName: 'No project', projectId: null, workspaceId: 10 }
+          { description: 'Deep work', label: 'Deep work', projectName: 'WristTrack', projectId: 20, workspaceId: 10, start: daysAgoAt(0, 7), duration: 3600 },
+          { description: 'Client call', label: 'Client call', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: daysAgoAt(1, 15), duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', projectName: 'Admin', projectId: 22, workspaceId: 10, start: daysAgoAt(3, 11), duration: 1500 }
         ]
       },
       error: ''
@@ -183,7 +161,8 @@ export const SCENARIOS = [
   {
     name: '07-stopping',
     title: 'Stopping',
-    description: 'STOP TIMER pressed, waiting on Toggl.',
+    description: 'The live row tapped, waiting on Toggl.',
+    scrolls: true,
     state: {
       acting: true,
       status: {
@@ -200,8 +179,8 @@ export const SCENARIOS = [
           start: RUNNING_START
         },
         presets: [
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Admin', projectName: 'Admin', projectId: 22, workspaceId: 10 }
+          { description: 'Client call', label: 'Client call', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: daysAgoAt(1, 15), duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', projectName: 'Admin', projectId: 22, workspaceId: 10, start: daysAgoAt(3, 11), duration: 1500 }
         ]
       },
       error: ''
@@ -209,6 +188,7 @@ export const SCENARIOS = [
   },
   {
     name: '07b-running-stale',
+    scrolls: true,
     title: 'Running, sync paused',
     description:
       "Toggl's hourly request allowance is spent, so the phone is serving its last known state. The clock keeps ticking, which is why the screen says so.",
@@ -230,8 +210,8 @@ export const SCENARIOS = [
           start: RUNNING_START
         },
         presets: [
-          { description: 'Client call', label: 'Client call', subtitle: 'Home Maintenance', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10 },
-          { description: 'Invoicing', label: 'Invoicing', subtitle: 'Admin', projectName: 'Admin', projectId: 22, workspaceId: 10 }
+          { description: 'Client call', label: 'Client call', projectName: 'Home Maintenance', projectId: 21, workspaceId: 10, start: daysAgoAt(1, 15), duration: 2700 },
+          { description: 'Invoicing', label: 'Invoicing', projectName: 'Admin', projectId: 22, workspaceId: 10, start: daysAgoAt(3, 11), duration: 1500 }
         ]
       },
       error: ''

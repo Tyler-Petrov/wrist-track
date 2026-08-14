@@ -7,9 +7,10 @@
 import {
   asArray,
   buildAuthHeader,
-  buildPresets,
+  buildHistory,
   createTogglClient,
   friendlyError,
+  recentEntriesPath,
   reduceAccount
 } from '../app-side/toggl.js'
 
@@ -72,8 +73,8 @@ await check('reads the running entry', async () => {
   return entry ? `running: ${entry.description || '(no description)'}` : 'no timer running'
 })
 
-await check('builds watch presets from recent entries', async () => {
-  const recent = await client.request('/me/time_entries')
-  const presets = buildPresets(asArray(recent), account, { description: 'Working' })
-  return presets.map((preset) => `${preset.description} / ${preset.projectName}`).join(' | ')
+await check('builds the watch history from the past week', async () => {
+  const recent = await client.request(recentEntriesPath())
+  const history = buildHistory(asArray(recent), account, { description: 'Working' })
+  return history.map((item) => `${item.label} / ${item.subtitle}`).join(' | ')
 })

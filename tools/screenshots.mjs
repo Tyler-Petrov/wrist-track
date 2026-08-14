@@ -3,6 +3,7 @@
 //
 // Usage: node tools/screenshots.mjs [outputDir]
 import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { homedir } from 'node:os'
@@ -14,6 +15,15 @@ const PANEL = { width: 432, height: 514, radius: 106 }
 const CHROME = process.env.CHROME_BIN || `${homedir()}/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome`
 const OUT = process.argv[2] || 'docs/screens'
 
+const ASSETS = 'assets/bip-max.w432-s'
+
+/** Inlines a packaged asset, so the rendered screens show what ships. */
+function readAsset(name) {
+  const path = `${ASSETS}/${name}`
+  if (!name || !existsSync(path)) return null
+  return `data:image/png;base64,${readFileSync(path).toString('base64')}`
+}
+
 const hex = (value) => `#${Number(value).toString(16).padStart(6, '0')}`
 const escape = (value) =>
   String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -23,6 +33,14 @@ function widgetHtml(item) {
 
   if (item.type === 'FILL_RECT') {
     return `<div style="position:absolute;${box};background:${hex(item.color)};border-radius:${item.radius || 0}px"></div>`
+  }
+
+  // The real asset, so the rendered screens show the icon that ships.
+  if (item.type === 'IMG') {
+    const source = readAsset(item.src)
+    return source
+      ? `<img src="${source}" style="position:absolute;${box}">`
+      : `<div style="position:absolute;${box}"></div>`
   }
 
   const isButton = item.type === 'BUTTON'

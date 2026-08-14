@@ -5,12 +5,14 @@ import {
   HOUR_MS,
   REFRESH_LIMIT,
   SLOW_POLL_MS,
+  entryAsHistoryItem,
   entryAsPreset,
   isFresh,
+  mergeFreshHistory,
   nextAllowanceAt,
   nextPollDelay,
   presetKey,
-  promotePreset,
+  promoteHistory,
   recordSpend,
   refreshAllowance,
   relabelEntry,
@@ -18,6 +20,7 @@ import {
   withinWindow,
   withoutPreset
 } from '../app-side/cache.js'
+import { HISTORY_LIMIT } from '../app-side/toggl.js'
 
 const NOW = 1_800_000_000_000
 const spent = (count, at = NOW) => Array.from({ length: count }, () => at)
@@ -121,6 +124,18 @@ test('the status signature reacts to what the screen shows', () => {
     'a timer re-labelled elsewhere must redraw'
   )
   assert.notEqual(statusSignature(base), statusSignature({ ...base, presets: [] }))
+  // Two recordings of the same job are different rows, so a new one landing
+  // in the history must redraw even though every label matches.
+  assert.notEqual(
+    statusSignature({ ...base, presets: [preset({ start: '2026-08-12T09:00:00Z' })] }),
+    statusSignature({ ...base, presets: [preset({ start: '2026-08-12T11:00:00Z' })] })
+  )
+  // A re-read that only corrects what a row says — a locally estimated
+  // duration replaced by Toggl's — must redraw as well.
+  assert.notEqual(
+    statusSignature({ ...base, presets: [preset({ start: 'x', duration: 60, subtitle: 'Today · 1m' })] }),
+    statusSignature({ ...base, presets: [preset({ start: 'x', duration: 300, subtitle: 'Today · 5m' })] })
+  )
   assert.equal(statusSignature(null), 'none')
   assert.equal(statusSignature({ configured: false }), 'unconfigured')
 })
@@ -133,28 +148,76 @@ test('presets are identified by workspace, project and description together', ()
   assert.equal(presetKey(preset({ projectId: null })), presetKey(preset({ projectId: 0 })))
 })
 
-test('starting removes a job from the list and stopping puts it back on top', () => {
+test('starting hides a job from the list and stopping records it on top', () => {
   const list = [preset(), preset({ description: 'Client call', projectId: 21 })]
 
   const started = withoutPreset(list, preset())
   assert.deepEqual(started.map((item) => item.description), ['Client call'])
 
-  const stopped = promotePreset(started, preset())
+  const stopped = promoteHistory(started, preset())
   assert.deepEqual(stopped.map((item) => item.description), ['Deep work', 'Client call'])
 })
 
-test('promoting never duplicates a job and respects the list limit', () => {
-  const list = [preset({ description: 'A' }), preset({ description: 'B' }), preset({ description: 'C' })]
-  const promoted = promotePreset(list, preset({ description: 'C' }))
-  assert.deepEqual(promoted.map((item) => item.description), ['C', 'A', 'B'])
+test('promoting keeps earlier recordings of the same job, and respects the limit', () => {
+  // The list is a history now: the run that just finished joins the runs that
+  // came before it, which is exactly what a re-read from Toggl would say.
+  const list = [preset({ description: 'A' }), preset({ description: 'B' })]
+  const promoted = promoteHistory(list, preset({ description: 'B' }))
+  assert.deepEqual(promoted.map((item) => item.description), ['B', 'A', 'B'])
 
-  const many = Array.from({ length: 8 }, (_, index) => preset({ description: `job-${index}` }))
-  assert.equal(promotePreset(many, preset({ description: 'new' })).length, 5)
+  const many = Array.from({ length: HISTORY_LIMIT }, (_, index) => preset({ description: `job-${index}` }))
+  assert.equal(promoteHistory(many, preset({ description: 'new' })).length, HISTORY_LIMIT)
 })
 
 test('a running entry converts to a preset that can start it again', () => {
   const running = { id: 7, description: 'Deep work', label: 'Deep work', subtitle: 'WristTrack', projectId: 20, projectName: 'WristTrack', workspaceId: 10, start: 'x' }
   assert.deepEqual(entryAsPreset(running), preset())
+})
+
+test('a fresh re-read keeps the recording that beat it, and only that', () => {
+  const now = Date.parse('2026-08-12T12:00:00Z')
+  // Stopped seconds ago, while the re-read was in flight: Toggl's snapshot
+  // cannot mention it yet, so it must survive the merge.
+  const justStopped = preset({ start: '2026-08-12T11:30:00Z', duration: 1795 })
+  // Deleted in Toggl days ago: also absent from the fresh read, but ending
+  // long ago is what tells it apart — it must not resurrect.
+  const deleted = preset({ description: 'Deleted job', start: '2026-08-10T09:00:00Z', duration: 600 })
+  const fresh = [preset({ description: 'Client call', projectId: 21, start: '2026-08-12T10:00:00Z', duration: 900 })]
+
+  const merged = mergeFreshHistory([justStopped, deleted], fresh, now)
+  assert.deepEqual(merged.map((item) => item.description), ['Deep work', 'Client call'])
+
+  // When the fresh read does know the recording, its version wins — that is
+  // how a locally estimated duration gets corrected.
+  const corrected = mergeFreshHistory([justStopped], [{ ...justStopped, duration: 1800 }], now)
+  assert.deepEqual(corrected.map((item) => item.duration), [1800])
+})
+
+test('a stopped entry becomes a recording with its duration worked out locally', () => {
+  const now = Date.parse('2026-08-12T13:20:00Z')
+  const running = {
+    id: 7,
+    description: 'Deep work',
+    label: 'Deep work',
+    subtitle: 'WristTrack',
+    projectId: 20,
+    projectName: 'WristTrack',
+    workspaceId: 10,
+    start: '2026-08-12T12:00:00+00:00'
+  }
+
+  const item = entryAsHistoryItem(running, now)
+  assert.equal(item.duration, 80 * 60, 'the stop is now, so the length is known without asking Toggl')
+  assert.equal(item.start, running.start)
+  assert.match(item.subtitle, /1h 20m/)
+  assert.match(item.subtitle, /WristTrack/, 'the project is still named beside the length')
+  assert.ok(item.day, 'the recording knows which day heading it sorts under')
+
+  // A start the parser cannot read still yields a row, without a made-up length.
+  const odd = entryAsHistoryItem({ ...running, start: 'garbage' }, now)
+  assert.equal(odd.duration, 0)
+  assert.equal(odd.subtitle, 'WristTrack')
+  assert.equal(odd.day, null)
 })
 
 test('re-labelling keeps the entry identity and start time', () => {
