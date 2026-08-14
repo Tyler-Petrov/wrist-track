@@ -3,7 +3,7 @@ import { setInterval, clearInterval, setTimeout, clearTimeout } from '@zos/timer
 import { localStorage } from '@zos/storage'
 import { BasePage } from '@zeppos/zml/base-page'
 import { COLORS, CONTENT_WIDTH, GUTTER, SCREEN, u, x, y } from './theme'
-import { historyDay, historySubtitle } from '../../shared/history'
+import { historyDay, historySubtitle, parseStart } from '../../shared/history'
 
 // The watch keeps its own copy of the last screen it drew, so opening the app
 // shows the timer immediately instead of a spinner while the phone is asked.
@@ -318,23 +318,53 @@ Page(
     /**
      * Where every row and day heading sits. Drawing and measuring walk the
      * same plan, so the background cannot end up shorter than the list.
+     *
+     * The days run newest first, the way the reply arrives, but each day's
+     * recordings run earliest to latest — a day reads as the day was worked.
+     * Sorting here rather than on the phone leaves the cache newest-first,
+     * which is what promoting a finished run to the top of it relies on.
      */
     planList(items, from) {
-      const steps = []
-      let top = from
+      const groups = []
       let currentDay = null
       ;(items || []).forEach((item) => {
         const day = this.dayOf(item)
-        if (day && day !== currentDay) {
-          if (currentDay !== null) top += DAY_GAP
-          steps.push({ heading: day, top })
-          top += DAY_HEADING_HEIGHT
-          currentDay = day
+        // A row with no usable day joins whatever group it arrived in rather
+        // than starting one, so a heading is never repeated.
+        if (!groups.length || (day && day !== currentDay)) {
+          groups.push({ day, items: [] })
+          currentDay = day || currentDay
         }
-        steps.push({ item, top })
-        top += ROW_PITCH
+        groups[groups.length - 1].items.push(item)
+      })
+
+      const steps = []
+      let top = from
+      groups.forEach((group, index) => {
+        if (group.day) {
+          if (index > 0) top += DAY_GAP
+          steps.push({ heading: group.day, top })
+          top += DAY_HEADING_HEIGHT
+        }
+        this.byStart(group.items).forEach((item) => {
+          steps.push({ item, top })
+          top += ROW_PITCH
+        })
       })
       return { steps, bottom: top }
+    },
+
+    /** Earliest first, with anything undateable left at the end in order. */
+    byStart(items) {
+      return items
+        .map((item, index) => ({ item, index, at: parseStart(item.start) }))
+        .sort((a, b) => {
+          if (a.at === b.at) return a.index - b.index
+          if (a.at === null) return 1
+          if (b.at === null) return -1
+          return a.at - b.at
+        })
+        .map((entry) => entry.item)
     },
 
     /** Draws a plan; every row starts the job it names. */

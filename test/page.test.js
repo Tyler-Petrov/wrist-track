@@ -450,6 +450,11 @@ test('recordings group under one centred heading per day, tracked days only', as
   assert.ok(heading.y < first.y, 'the heading sits above its day')
   assert.equal(heading.align_h, 'CENTER_H', 'day headings are centred')
 
+  // Within a day the recordings run earliest to latest, so the day reads the
+  // way it was worked — B ran at 7, A at 9.
+  const second = widgets.find((widget) => widget.text === 'B')
+  assert.ok(second.y < first.y, 'the earlier recording comes first')
+
   const subtitle = widgets.find((widget) => /^\d{1,2}:\d{2}-/.test(String(widget.text ?? '')))
   assert.equal(heading.color, subtitle.color, 'the heading shares the subtitle colour')
   assert.ok(heading.text_size > subtitle.text_size, 'and is a touch bigger')
@@ -467,6 +472,27 @@ test('recordings group under one centred heading per day, tracked days only', as
  * words its own rows from the raw start and duration, so an old reply renders
  * as the current build draws it.
  */
+test('the days stay newest first, while each day runs earliest to latest', async () => {
+  // Arrives newest first, the way Toggl and the phone cache hold it.
+  const page = await makePage({
+    status: {
+      ...SAVED,
+      presets: [
+        recording('today late', 0, 16),
+        recording('today early', 0, 8),
+        recording('friday late', 3, 17),
+        recording('friday early', 3, 9)
+      ]
+    }
+  })
+  const widgets = await drawn(page)
+  const order = widgets
+    .filter((widget) => /^(today|friday) (early|late)$/.test(String(widget.text ?? '')))
+    .map((widget) => widget.text)
+
+  assert.deepEqual(order, ['today early', 'today late', 'friday early', 'friday late'])
+})
+
 test('a reply from an older build still groups and shows its times', async () => {
   const stale = {
     ...recording('Jairus', 1, 9, 3 * 3600 + 3 * 60),
