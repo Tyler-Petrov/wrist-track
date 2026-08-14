@@ -34,8 +34,9 @@ question. See [Staying in sync](#staying-in-sync) for why that matters.
 - Picks up timers started, stopped or re-labelled somewhere else — the Toggl
   phone app, the web app, the browser extension — usually within 15 seconds.
 - Starts and stops timers against Toggl Track API v9.
-- Shows your past week of recordings as one-tap rows, newest first, each with
-  the day it ran and how long it took. Tap one to start that job again.
+- Shows your past week of recordings as rows, newest first, each with the day
+  it ran and how long it took. Pick one and press **Start timer** to run that
+  job again.
 - Re-labels a running timer in place: tap a job below the clock and the
   description and project change without resetting the elapsed time.
 - Handles an empty account, a rejected token, an offline phone and Toggl's
@@ -209,7 +210,8 @@ Open **WristTrack** from the watch's app list.
 
 - **This week** — your past week of recordings as rows, each saying when it
   ran and for how long. Tap one to select it, then **Start timer** to run that
-  job again. More than three shows a `‹ 2 of 5 ›` pager.
+  job again. More than three shows a pager counting through however many the
+  week holds, such as `‹ 2 of 12 ›`.
 - **Running** — the pink card shows the live clock. The jobs below it are
   one-tap switches: tapping one re-labels the running entry without resetting
   the clock. Tap the card itself for the full list.

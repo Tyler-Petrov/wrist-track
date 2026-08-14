@@ -129,6 +129,12 @@ test('the status signature reacts to what the screen shows', () => {
     statusSignature({ ...base, presets: [preset({ start: '2026-08-12T09:00:00Z' })] }),
     statusSignature({ ...base, presets: [preset({ start: '2026-08-12T11:00:00Z' })] })
   )
+  // A re-read that only corrects what a row says — a locally estimated
+  // duration replaced by Toggl's — must redraw as well.
+  assert.notEqual(
+    statusSignature({ ...base, presets: [preset({ start: 'x', duration: 60, subtitle: 'Today · 1m' })] }),
+    statusSignature({ ...base, presets: [preset({ start: 'x', duration: 300, subtitle: 'Today · 5m' })] })
+  )
   assert.equal(statusSignature(null), 'none')
   assert.equal(statusSignature({ configured: false }), 'unconfigured')
 })

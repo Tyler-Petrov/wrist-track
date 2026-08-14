@@ -94,8 +94,12 @@ export function statusSignature(status) {
     ? `${running.id}/${running.label}/${running.projectName}/${running.start}`
     : 'idle'
   // The start stamp is part of the identity: two recordings of the same job
-  // are different rows, and a list that reordered has to redraw.
-  const presets = (status.presets || []).map((item) => `${presetKey(item)}@${item.start || ''}`).join('|')
+  // are different rows, and a list that reordered has to redraw. So is what
+  // the row says — a background re-read that corrects a locally estimated
+  // duration changes the subtitle without changing the key.
+  const presets = (status.presets || [])
+    .map((item) => `${presetKey(item)}@${item.start || ''}/${item.duration || 0}/${item.label || ''}/${item.subtitle || ''}`)
+    .join('|')
   return `${head}#${presets}`
 }
 

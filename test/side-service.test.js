@@ -237,6 +237,25 @@ test('a timer stopped elsewhere is recorded locally, then the week is re-read be
   assert.deepEqual(calls, ['GET /me/time_entries/current', 'GET /me/time_entries'])
 })
 
+test('a timer stopped and replaced elsewhere still records the finished run', async () => {
+  const { send, side, calls, state } = await setup({ current: runningEntry() })
+  await send('GET_STATUS')
+
+  // Elsewhere: the timer is stopped and a new one started before any poll,
+  // so /current never answers empty — it answers with a different entry.
+  state.current = runningEntry({ id: 5000, description: 'Errands', project_id: null, project_name: undefined, start: '2026-07-30T19:00:00+00:00' })
+  calls.length = 0
+  ageStatus(side, STATUS_MAX_AGE + 1)
+  const after = await send('GET_STATUS')
+
+  assert.equal(after.running.id, 5000, 'the replacement is what is running now')
+  assert.equal(after.presets[0].description, 'Deep work', 'the finished run joined the history')
+  assert.equal(after.presets[0].start, START)
+
+  await settle()
+  assert.deepEqual(calls, ['GET /me/time_entries/current', 'GET /me/time_entries'])
+})
+
 test('an expired history is served at once and re-read in the background', async () => {
   const { send, side, calls, state } = await setup()
   await send('GET_STATUS')

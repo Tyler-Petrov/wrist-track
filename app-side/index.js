@@ -264,7 +264,10 @@ async function refreshStatus(token, cache) {
   // that is what keeps a refresh to one request. The cached copy is what is
   // answered from; the re-read runs in the background when the copy has
   // expired, and its result arrives with a later poll.
-  const stoppedElsewhere = Boolean(cache && cache.running) && !(current && current.id)
+  // Stopped, or stopped and replaced: a different id running now still means
+  // the cached entry finished, and its recording belongs in the history.
+  const stoppedElsewhere =
+    Boolean(cache && cache.running) && Number(cache.running.id) !== Number(current && current.id)
   const empty = !cache || !(cache.presets || []).length
   const expired = empty || !isFresh(cache.presetsAt, HISTORY_MAX_AGE)
 
