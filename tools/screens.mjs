@@ -104,8 +104,8 @@ export const SCENARIOS = [
     }
   },
   {
-    name: '02-connect-toggl',
-    title: 'Connect Toggl',
+    name: '02-connect',
+    title: 'Connect Solidtime',
     description: 'No API token saved in Zepp yet.',
     state: { status: { configured: false, running: null, presets: [] }, error: '' }
   },
@@ -135,7 +135,7 @@ export const SCENARIOS = [
   {
     name: '04b-ready-no-description',
     title: 'Ready, entry with no description',
-    description: 'Many Toggl entries are project-only; the project becomes the label.',
+    description: 'Many entries are project-only; the project becomes the label.',
     state: {
       status: {
         configured: true,
@@ -152,7 +152,7 @@ export const SCENARIOS = [
   {
     name: '05-starting',
     title: 'Starting',
-    description: 'A recording tapped, waiting on Toggl.',
+    description: 'A recording tapped, waiting on Solidtime.',
     state: {
       acting: true,
       status: {
@@ -196,7 +196,7 @@ export const SCENARIOS = [
   {
     name: '07-stopping',
     title: 'Stopping',
-    description: 'The live row tapped, waiting on Toggl.',
+    description: 'The live row tapped, waiting on Solidtime.',
     scrolls: true,
     state: {
       acting: true,
@@ -226,7 +226,7 @@ export const SCENARIOS = [
     scrolls: true,
     title: 'Running, sync paused',
     description:
-      "Toggl's hourly request allowance is spent, so the phone is serving its last known state. The clock keeps ticking, which is why the screen says so.",
+      "The request budget is spent, so the phone is serving its last known state. The clock keeps ticking, which is why the screen says so.",
     state: {
       stale: true,
       status: {
@@ -261,8 +261,8 @@ export const SCENARIOS = [
   {
     name: '09-error-offline',
     title: 'Offline',
-    description: 'The phone could not reach Toggl.',
-    state: { status: null, error: 'Phone is offline or Toggl is unavailable.' }
+    description: 'The phone could not reach Solidtime.',
+    state: { status: null, error: 'Phone is offline or Solidtime is unavailable.' }
   },
   {
     name: '10-report',

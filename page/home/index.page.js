@@ -21,8 +21,8 @@ import {
 const STATUS_KEY = 'wt.status'
 
 // A timer stopped on the phone or the web app has to be noticed by asking,
-// because a Side Service cannot hold a socket open to Toggl. The phone side
-// serves a cache and meters what actually reaches Toggl, so these polls are
+// because a Side Service cannot hold a socket open to Solidtime. The phone
+// side serves a cache and meters what actually reaches Solidtime, so these polls are
 // mostly free; it also says when it is next worth asking, via nextPollMs.
 const POLL_MIN_MS = 5 * 1000
 const POLL_MAX_MS = 5 * 60 * 1000
@@ -31,7 +31,7 @@ const POLL_FALLBACK_MS = 30 * 1000
 /**
  * Polling stops this long after the last thing the wearer did. Glances last
  * seconds, so anything past this is an app left open in a pocket — which must
- * not quietly spend the hour's allowance, whether or not the platform
+ * not quietly spend the request budget, whether or not the platform
  * suspends page timers when the screen sleeps.
  */
 const POLL_IDLE_STOP_MS = 2 * 60 * 1000
@@ -93,9 +93,9 @@ const ICON_SIZE = 26
 const PRIMARY_TOP = 380
 
 /**
- * Toggl returns RFC 3339 stamps such as `2026-07-30T12:04:09+00:00`. QuickJS
- * on the watch does not reliably parse every offset form, so the fields are
- * read directly.
+ * Solidtime returns UTC stamps such as `2026-07-30T12:04:09Z`, but offset
+ * forms such as `+00:00` are accepted too. QuickJS on the watch does not
+ * reliably parse every form, so the fields are read directly.
  */
 function parseTimestamp(value) {
   const text = String(value || '')
@@ -136,7 +136,7 @@ function formatElapsed(startedAt) {
 
 function errorText(error) {
   if (typeof error === 'string') return error
-  return (error && (error.message || error.error)) || 'Could not reach Toggl.'
+  return (error && (error.message || error.error)) || 'Could not reach Solidtime.'
 }
 
 /**
@@ -635,8 +635,8 @@ Page(
       else if (!this.state.status) this.renderSyncing()
       else if (!this.state.status.configured) {
         this.renderMessage(
-          'Connect Toggl',
-          'Open Zepp on your phone, then Devices, WristTrack, Settings, and paste your Toggl API token.',
+          'Connect Solidtime',
+          'Open Zepp on your phone, then Devices, WristTrack, Settings, and paste your Solidtime API token.',
           'Check again'
         )
       } else this.renderHistory()
@@ -772,7 +772,7 @@ Page(
       if (presets.length === 0) {
         this.panel(EMPTY_TOP, EMPTY_HEIGHT, COLORS.surface)
         this.text('Nothing tracked yet', EMPTY_TOP + 28, 34, 24, COLORS.text)
-        this.text('Start one from Toggl first', EMPTY_TOP + 62, 28, 18, COLORS.muted)
+        this.text('Start one in Solidtime first', EMPTY_TOP + 62, 28, 18, COLORS.muted)
       }
     },
 
@@ -840,7 +840,7 @@ Page(
     /**
      * Switches the running entry to another job. The history now includes the
      * running job's own past recordings, so a tap can name what is already
-     * running — which Toggl would accept and nothing would change, at the cost
+     * running — which Solidtime would accept and nothing would change, at the cost
      * of a request from an allowance worth guarding.
      */
     switchTo(running, preset) {
@@ -861,7 +861,7 @@ Page(
             description: preset.description,
             projectId: preset.projectId,
             // The labels travel too, so the phone can work out the result
-            // itself instead of spending a Toggl request re-reading it.
+            // itself instead of spending a Solidtime request re-reading it.
             label: preset.label,
             subtitle: preset.subtitle,
             projectName: preset.projectName
@@ -1047,7 +1047,7 @@ Page(
           this.state.checking = false
           this.saveStatus(result)
           if (changed) {
-            // Something moved elsewhere — Toggl on the phone, or the web app.
+            // Something moved elsewhere — the Solidtime web app, or another client.
             this.render()
           }
           this.schedulePoll(result.nextPollMs)

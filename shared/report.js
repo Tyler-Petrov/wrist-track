@@ -2,7 +2,7 @@
 //
 // Nothing here asks anybody anything. The month of recordings the home screen
 // draws is the same list this counts, so swiping to the report costs neither a
-// Bluetooth round trip nor a request from Toggl's hourly allowance — it is
+// Bluetooth round trip nor a request from Solidtime's rate limit — it is
 // arithmetic on what has already arrived.
 //
 // Extension included deliberately: this module is imported directly by the
@@ -175,14 +175,13 @@ function addTo(projects, name, seconds, live) {
  * A stretch of time as a total and a breakdown by project, longest first.
  *
  * A recording counts towards the stretch its *start* falls in, whole, even when
- * it ran past the end of it — which is how Toggl's own reports group entries,
- * so the two agree.
+ * it ran past the end of it, so a recording is never split across two cards.
  *
  * The history this reads is capped at fifty recordings over the past month
  * (`HISTORY_LIMIT`), oldest dropped first. A week busy enough to be cut off
  * that way would have to hold fifty recordings on its own, so in practice the
  * current week is always complete; the figure is a report on what the watch
- * holds, not an audit of the Toggl account.
+ * holds, not an audit of the Solidtime account.
  */
 export function rangeReport(items, running, { from, to, label }, now = Date.now()) {
   const projects = []

@@ -16,9 +16,9 @@ export const NO_PROJECT = 'No project'
 export const NO_DESCRIPTION = 'No description'
 
 /**
- * Toggl returns RFC 3339 stamps such as `2026-07-30T12:04:09+00:00`. QuickJS
- * on the watch does not reliably parse every offset form, so the fields are
- * read directly.
+ * Solidtime returns UTC stamps such as `2026-07-30T12:04:09Z`, but offset
+ * forms such as `+00:00` are accepted too. QuickJS on the watch does not
+ * reliably parse every form, so the fields are read directly.
  */
 export function parseStart(value) {
   const text = String(value || '')
@@ -109,7 +109,7 @@ export function trustRunning(savedAt, now = Date.now()) {
 }
 
 /**
- * Toggl entries very often have no description — the project alone is the
+ * Entries very often have no description — the project alone is the
  * label. Keep the real description for the API and show something readable.
  */
 export function presetLabel(description, projectName) {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   FAST_POLL_MS,
-  HOUR_MS,
+  WINDOW_MS,
   REFRESH_LIMIT,
   SLOW_POLL_MS,
   entryAsHistoryItem,
@@ -20,19 +20,19 @@ import {
   withinWindow,
   withoutPreset
 } from '../app-side/cache.js'
-import { HISTORY_LIMIT } from '../app-side/toggl.js'
+import { HISTORY_LIMIT } from '../app-side/solidtime.js'
 
 const NOW = 1_800_000_000_000
 const spent = (count, at = NOW) => Array.from({ length: count }, () => at)
 
-test('the request window forgets calls older than an hour', () => {
-  const stamps = [NOW - HOUR_MS - 1, NOW - HOUR_MS + 1, NOW]
-  assert.deepEqual(withinWindow(stamps, NOW), [NOW - HOUR_MS + 1, NOW])
+test('the request window forgets calls older than a minute', () => {
+  const stamps = [NOW - WINDOW_MS - 1, NOW - WINDOW_MS + 1, NOW]
+  assert.deepEqual(withinWindow(stamps, NOW), [NOW - WINDOW_MS + 1, NOW])
   assert.deepEqual(withinWindow(null, NOW), [])
 })
 
 test('spending is recorded and prunes the window as it goes', () => {
-  const stale = spent(3, NOW - HOUR_MS - 1)
+  const stale = spent(3, NOW - WINDOW_MS - 1)
   assert.deepEqual(recordSpend(stale, 2, NOW), [NOW, NOW])
   assert.equal(recordSpend([], 1, NOW).length, 1)
 })
@@ -42,7 +42,7 @@ test('background refreshes hold back an allowance for start and stop', () => {
   assert.equal(refreshAllowance(spent(5), NOW), REFRESH_LIMIT - 5)
 
   // Spending the refresh budget must not be able to lock out a mutation:
-  // the reserve is what is left of Toggl's 30 once refreshes stop.
+  // the reserve is what is left of the window once refreshes stop.
   assert.equal(refreshAllowance(spent(REFRESH_LIMIT), NOW), 0)
   assert.equal(refreshAllowance(spent(REFRESH_LIMIT + 99), NOW), 0)
 })
@@ -50,49 +50,59 @@ test('background refreshes hold back an allowance for start and stop', () => {
 test('an exhausted window reopens as its oldest call ages out', () => {
   assert.equal(nextAllowanceAt(spent(2), NOW), NOW, 'not exhausted, so no wait')
 
-  const oldest = NOW - 10 * 60 * 1000
+  const oldest = NOW - 10 * 1000
   const stamps = [oldest, ...spent(REFRESH_LIMIT - 1)]
-  assert.equal(nextAllowanceAt(stamps, NOW), oldest + HOUR_MS)
+  assert.equal(nextAllowanceAt(stamps, NOW), oldest + WINDOW_MS)
 })
 
-test('polling backs off as the hour fills and stops when it is spent', () => {
+test('polling backs off as the window fills and stops when it is spent', () => {
   assert.equal(nextPollDelay([], NOW), FAST_POLL_MS)
   assert.equal(nextPollDelay(spent(REFRESH_LIMIT - 8), NOW), SLOW_POLL_MS)
 
   const exhausted = nextPollDelay(spent(REFRESH_LIMIT), NOW)
   assert.ok(exhausted >= SLOW_POLL_MS, 'a spent window must not be polled tightly')
-  assert.ok(exhausted <= HOUR_MS, `waits at most the window itself, got ${exhausted}`)
+  assert.ok(exhausted <= WINDOW_MS, `waits at most the window itself, got ${exhausted}`)
 })
 
 /**
  * The whole point of the budget: leaving the watch screen open must never be
  * able to spend the requests that STOP needs. This drives the real poll
- * schedule for an hour and counts what it would have cost Toggl.
+ * schedule for an hour and counts what it would have cost Solidtime.
  */
 test('a screen left open for an hour cannot spend the mutation reserve', () => {
   let stamps = []
   let clock = NOW
-  const deadline = NOW + HOUR_MS
+  const deadline = NOW + 60 * WINDOW_MS
   let polls = 0
+  let busiest = 0
 
   while (clock < deadline) {
     clock += nextPollDelay(stamps, clock)
     if (clock >= deadline) break
-    // Each poll costs the one request that asks Toggl what is running.
+    // Each poll costs the one request that asks Solidtime what is running.
     stamps = recordSpend(stamps, 1, clock)
+    busiest = Math.max(busiest, withinWindow(stamps, clock).length)
     polls += 1
   }
 
-  assert.ok(
-    withinWindow(stamps, clock).length <= REFRESH_LIMIT,
-    `refreshes spent ${withinWindow(stamps, clock).length}, over the ${REFRESH_LIMIT} they may use`
-  )
-  // It should also spend most of what it is allowed, or the poll is too timid
-  // to notice a timer stopped elsewhere.
-  assert.ok(
-    polls >= REFRESH_LIMIT - 2 && polls <= REFRESH_LIMIT,
-    `expected close to ${REFRESH_LIMIT} polls in the hour, got ${polls}`
-  )
+  assert.ok(busiest <= REFRESH_LIMIT, `refreshes spent ${busiest} in a window, over the ${REFRESH_LIMIT} they may use`)
+  // A plain open screen never comes near the limit, so it should keep polling
+  // at the fast rate the whole hour, or a timer stopped elsewhere goes
+  // unnoticed for longer than it needs to.
+  const fastPolls = Math.floor((60 * WINDOW_MS) / FAST_POLL_MS)
+  assert.ok(polls >= fastPolls - 1, `expected about ${fastPolls} polls in the hour, got ${polls}`)
+})
+
+test('a burst of refreshes is cut off before it reaches the mutation reserve', () => {
+  let stamps = []
+  let clock = NOW
+  // Something asking every second, far faster than the watch ever should.
+  for (let tick = 0; tick < 120; tick += 1) {
+    clock += 1000
+    if (refreshAllowance(stamps, clock) > 0) stamps = recordSpend(stamps, 1, clock)
+    assert.ok(withinWindow(stamps, clock).length <= REFRESH_LIMIT)
+  }
+  assert.ok(nextPollDelay(stamps, clock) >= SLOW_POLL_MS, 'a spent window must not be polled tightly')
 })
 
 test('freshness rejects missing and expired timestamps', () => {
@@ -131,7 +141,7 @@ test('the status signature reacts to what the screen shows', () => {
     statusSignature({ ...base, presets: [preset({ start: '2026-08-12T11:00:00Z' })] })
   )
   // A re-read that only corrects what a row says — a locally estimated
-  // duration replaced by Toggl's — must redraw as well.
+  // duration replaced by Solidtime's — must redraw as well.
   assert.notEqual(
     statusSignature({ ...base, presets: [preset({ start: 'x', duration: 60, subtitle: 'Today · 1m' })] }),
     statusSignature({ ...base, presets: [preset({ start: 'x', duration: 300, subtitle: 'Today · 5m' })] })
@@ -160,7 +170,7 @@ test('starting hides a job from the list and stopping records it on top', () => 
 
 test('promoting keeps earlier recordings of the same job, and respects the limit', () => {
   // The list is a history now: the run that just finished joins the runs that
-  // came before it, which is exactly what a re-read from Toggl would say.
+  // came before it, which is exactly what a re-read from Solidtime would say.
   const list = [preset({ description: 'A' }), preset({ description: 'B' })]
   const promoted = promoteHistory(list, preset({ description: 'B' }))
   assert.deepEqual(promoted.map((item) => item.description), ['B', 'A', 'B'])
@@ -176,10 +186,10 @@ test('a running entry converts to a preset that can start it again', () => {
 
 test('a fresh re-read keeps the recording that beat it, and only that', () => {
   const now = Date.parse('2026-08-12T12:00:00Z')
-  // Stopped seconds ago, while the re-read was in flight: Toggl's snapshot
+  // Stopped seconds ago, while the re-read was in flight: Solidtime's snapshot
   // cannot mention it yet, so it must survive the merge.
   const justStopped = preset({ start: '2026-08-12T11:30:00Z', duration: 1795 })
-  // Deleted in Toggl days ago: also absent from the fresh read, but ending
+  // Deleted in Solidtime days ago: also absent from the fresh read, but ending
   // long ago is what tells it apart — it must not resurrect.
   const deleted = preset({ description: 'Deleted job', start: '2026-08-10T09:00:00Z', duration: 600 })
   const fresh = [preset({ description: 'Client call', projectId: 21, start: '2026-08-12T10:00:00Z', duration: 900 })]
@@ -207,7 +217,7 @@ test('a stopped entry becomes a recording with its duration worked out locally',
   }
 
   const item = entryAsHistoryItem(running, now)
-  assert.equal(item.duration, 80 * 60, 'the stop is now, so the length is known without asking Toggl')
+  assert.equal(item.duration, 80 * 60, 'the stop is now, so the length is known without asking Solidtime')
   assert.equal(item.start, running.start)
   assert.match(item.subtitle, /1h 20m/)
   assert.match(item.subtitle, /WristTrack/, 'the project is still named beside the length')

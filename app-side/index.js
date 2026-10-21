@@ -3,15 +3,18 @@ import {
   asArray,
   buildHistory,
   credentialTag,
-  createTogglClient,
+  createSolidtimeClient,
+  fetchAccount,
   friendlyError,
   makeStartPayload,
+  makeStopPayload,
   makeUpdatePayload,
-  projectNamesFrom,
+  normalizeServer,
+  pickWorkspace,
+  projectBillable,
   publicEntry,
-  recentEntriesPath,
-  reduceAccount
-} from './toggl'
+  recentEntriesPath
+} from './solidtime'
 import {
   HISTORY_MAX_AGE,
   STATUS_MAX_AGE,
@@ -29,10 +32,11 @@ import {
   withinWindow
 } from './cache'
 
-const ACCOUNT_KEY = 'togglAccount'
-const STATUS_KEY = 'togglStatus'
-const SPEND_KEY = 'togglSpend'
-const TOKEN_KEY = 'togglToken'
+const ACCOUNT_KEY = 'solidtimeAccount'
+const STATUS_KEY = 'solidtimeStatus'
+const SPEND_KEY = 'solidtimeSpend'
+const TOKEN_KEY = 'solidtimeToken'
+const SERVER_KEY = 'solidtimeServer'
 const ACCOUNT_MAX_AGE = 6 * 60 * 60 * 1000
 const RESPONSE_TIMEOUT = 15 * 1000
 let mutationInFlight = null
@@ -58,6 +62,18 @@ function currentToken() {
   return String(settingsLib.getItem(TOKEN_KEY) || '').trim()
 }
 
+function currentServer() {
+  return normalizeServer(settingsLib.getItem(SERVER_KEY))
+}
+
+/**
+ * The same token means nothing on a different server, so caches are keyed by
+ * both.
+ */
+function tagFor(token) {
+  return credentialTag(`${currentServer()} ${token}`)
+}
+
 function assertCurrentToken(token) {
   if (currentToken() !== token) throw new Error('Credentials changed while syncing.')
 }
@@ -70,23 +86,23 @@ function readSpend() {
 
 /**
  * Counting inside the fetch wrapper rather than at the call sites means every
- * request that reaches Toggl is charged, including the ones made indirectly
- * while refreshing the account.
+ * request that reaches Solidtime is charged, including the ones made
+ * indirectly while refreshing the account.
  */
 function meteredFetch(request) {
   settingsLib.setItem(SPEND_KEY, JSON.stringify(recordSpend(readSpend(), 1)))
   return fetch(request)
 }
 
-function togglClient(token) {
-  return createTogglClient(meteredFetch, () => token)
+function solidtimeClient(token) {
+  return createSolidtimeClient(meteredFetch, () => token, currentServer)
 }
 
 // ---- status cache ----------------------------------------------------------
 
 function readStatus(token) {
   const cache = readJson(STATUS_KEY, null)
-  return cache && cache.credentialTag === credentialTag(token) ? cache : null
+  return cache && cache.credentialTag === tagFor(token) ? cache : null
 }
 
 function writeStatus(cache) {
@@ -122,21 +138,21 @@ function present(cache, stale) {
 
 async function syncAccount(expectedToken) {
   const token = expectedToken || currentToken()
-  if (!token) throw new Error('Connect Toggl in Zepp settings.')
+  if (!token) throw new Error('Connect Solidtime in Zepp settings.')
 
-  const me = await togglClient(token).request('/me?with_related_data=true')
+  const reduced = await fetchAccount(solidtimeClient(token))
   assertCurrentToken(token)
 
   const account = {
-    ...reduceAccount(me),
-    credentialTag: credentialTag(token),
+    ...reduced,
+    credentialTag: tagFor(token),
     syncedAt: Date.now()
   }
   settingsLib.setItem(ACCOUNT_KEY, JSON.stringify(account))
   settingsLib.removeItem('connectionError')
 
-  // A saved workspace can disappear from the account, most often after
-  // reconnecting with a different Toggl login. Leaving the stale id in place
+  // A saved organization can disappear from the account, most often after
+  // reconnecting with a different Solidtime login. Leaving the stale id in place
   // would start timers against a workspace the token cannot reach, so every
   // sync re-pins the preference to the account default when it no longer
   // matches. The project preference belongs to the old workspace, so it goes.
@@ -155,7 +171,7 @@ async function getAccount(expectedToken) {
   const account = readJson(ACCOUNT_KEY, null)
   const current =
     account &&
-    account.credentialTag === credentialTag(token) &&
+    account.credentialTag === tagFor(token) &&
     Date.now() - Number(account.syncedAt || 0) < ACCOUNT_MAX_AGE
   return current ? account : syncAccount(token)
 }
@@ -192,15 +208,19 @@ function withResponseTimeout(promise) {
 
 /**
  * Reads the recent entries, which is the second request a refresh can cost.
- * It is also the only call that asks Toggl to inline project names, so the
- * index it yields is what lets the running entry be named at all.
+ * History comes from one organization, the one timers start in.
  */
 async function fetchRecent(client, token, account) {
-  const recent = await client.request(recentEntriesPath())
+  const preferences = getPreferences()
+  const workspace = pickWorkspace(account, preferences.workspaceId)
+  if (!workspace) throw new Error('This Solidtime login has no organization.')
+  const recent = await client.request(recentEntriesPath(workspace))
   assertCurrentToken(token)
   return {
-    presets: buildHistory(asArray(recent), account, getPreferences()),
-    projectNames: projectNamesFrom(recent)
+    presets: buildHistory(asArray(recent), account, preferences),
+    // Solidtime never names projects inside an entry, so the names come from
+    // the account's project list, archived projects included.
+    projectNames: account.projectNames || {}
   }
 }
 
@@ -216,7 +236,7 @@ function lazyReloadHistory(token) {
   if (refreshAllowance(readSpend()) <= 0) return
   historyReloadInFlight = true
   ;(async () => {
-    const client = togglClient(token)
+    const client = solidtimeClient(token)
     const account = await getAccount(token)
     const fresh = await fetchRecent(client, token, account)
     // Merge into whatever the cache says by now — a stop or start may have
@@ -244,10 +264,8 @@ function lazyReloadHistory(token) {
 }
 
 /**
- * The project names a poll can use without re-reading the recent entries. The
- * index is stored with the cache precisely because the job list it was built
- * from has the running entry removed from it, so rebuilding from that list
- * would lose the one name the running card actually needs.
+ * The project names a poll can use without re-reading the recent entries,
+ * stored with the cache so the running card can be named from it.
  */
 function cachedProjectNames(cache) {
   if (cache && cache.projectNames) return cache.projectNames
@@ -255,9 +273,9 @@ function cachedProjectNames(cache) {
 }
 
 async function refreshStatus(token, cache) {
-  const client = togglClient(token)
+  const client = solidtimeClient(token)
   const account = await getAccount(token)
-  const current = await client.request('/me/time_entries/current')
+  const current = await client.active()
   assertCurrentToken(token)
 
   // The month of history is re-read lazily, never on the poll's own clock —
@@ -267,7 +285,7 @@ async function refreshStatus(token, cache) {
   // Stopped, or stopped and replaced: a different id running now still means
   // the cached entry finished, and its recording belongs in the history.
   const stoppedElsewhere =
-    Boolean(cache && cache.running) && Number(cache.running.id) !== Number(current && current.id)
+    Boolean(cache && cache.running) && String(cache.running.id) !== String(current && current.id)
   const empty = !cache || !(cache.presets || []).length
   const expired = empty || !isFresh(cache.presetsAt, HISTORY_MAX_AGE)
 
@@ -296,7 +314,7 @@ async function refreshStatus(token, cache) {
   const running = publicEntry(current, account, projectNames)
 
   return writeStatus({
-    credentialTag: credentialTag(token),
+    credentialTag: tagFor(token),
     userName: account.fullname,
     running,
     presets,
@@ -327,23 +345,24 @@ async function getStatus(options = {}) {
 async function updateTimer(params) {
   return runMutation(async () => {
     const token = currentToken()
-    const client = togglClient(token)
-    const entryId = Number(params.entryId)
-    const workspaceId = Number(params.workspaceId)
+    const client = solidtimeClient(token)
+    const entryId = params.entryId ? String(params.entryId) : ''
+    const workspaceId = params.workspaceId ? String(params.workspaceId) : ''
     if (!entryId || !workspaceId) throw new Error('That timer is no longer running.')
+    const account = await getAccount(token)
 
     assertCurrentToken(token)
-    await client.request(`/workspaces/${workspaceId}/time_entries/${entryId}`, {
+    await client.request(`/organizations/${workspaceId}/time-entries/${entryId}`, {
       method: 'PUT',
       body: makeUpdatePayload({
         description: params.description,
         projectId: params.projectId,
-        workspaceId
+        billable: projectBillable(account, params.projectId)
       })
     })
     assertCurrentToken(token)
 
-    // Toggl has accepted the new label, so the result is already known — the
+    // Solidtime has accepted the new label, so the result is already known — the
     // entry keeps its id and start time and only its wording changed. Take
     // that shortcut only with the whole preset in hand; guessing at the
     // project name would put something wrong on the card.
@@ -367,30 +386,31 @@ async function updateTimer(params) {
 async function startTimer(params) {
   return runMutation(async () => {
     const token = currentToken()
-    const client = togglClient(token)
+    const client = solidtimeClient(token)
     const account = await getAccount(token)
     const preferences = getPreferences()
     const cache = readStatus(token)
 
-    // Always ask Toggl, never the cache. A timer started on the phone seconds
+    // Always ask Solidtime, never the cache. A timer started on the phone seconds
     // ago may not have been polled yet, and starting a second one over it
     // corrupts the time log — which costs more than the request this saves.
-    const current = await client.request('/me/time_entries/current')
+    const current = await client.active()
     assertCurrentToken(token)
     if (current && current.id) throw new Error('A timer is already running.')
 
-    const workspaceId = Number(params.workspaceId || preferences.workspaceId || account.defaultWorkspaceId)
-    if (!workspaceId) throw new Error('Choose a workspace in Zepp settings.')
+    const workspace = pickWorkspace(account, params.workspaceId || preferences.workspaceId)
+    if (!workspace) throw new Error('Choose an organization in Zepp settings.')
 
     assertCurrentToken(token)
-    const created = await client.request(`/workspaces/${workspaceId}/time_entries`, {
+    const created = await client.request(`/organizations/${workspace.id}/time-entries`, {
       method: 'POST',
       body: makeStartPayload({
-        // A preset carrying an empty description is deliberate — many Toggl
+        // A preset carrying an empty description is deliberate — many
         // entries are project-only — so only fall back when none was sent.
         description: params.description === undefined ? preferences.description : params.description,
         projectId: params.projectId,
-        workspaceId
+        memberId: workspace.memberId,
+        billable: projectBillable(account, params.projectId)
       })
     })
     assertCurrentToken(token)
@@ -411,7 +431,7 @@ async function startTimer(params) {
 
     return present(
       writeStatus({
-        credentialTag: credentialTag(token),
+        credentialTag: tagFor(token),
         userName: account.fullname,
         running,
         presets: list.presets,
@@ -426,22 +446,24 @@ async function startTimer(params) {
 async function stopTimer(params) {
   return runMutation(async () => {
     const token = currentToken()
-    const client = togglClient(token)
+    const client = solidtimeClient(token)
     const cache = readStatus(token)
-    let entryId = Number(params.entryId)
-    let workspaceId = Number(params.workspaceId)
+    let entryId = params.entryId ? String(params.entryId) : ''
+    let workspaceId = params.workspaceId ? String(params.workspaceId) : ''
 
     if (!entryId || !workspaceId) {
-      const current = await client.request('/me/time_entries/current')
+      const current = await client.active()
       assertCurrentToken(token)
       if (!current || !current.id) return getStatus({ force: true })
       entryId = current.id
-      workspaceId = current.workspace_id || current.wid
+      workspaceId = current.organization_id
     }
 
     assertCurrentToken(token)
-    await client.request(`/workspaces/${workspaceId}/time_entries/${entryId}/stop`, {
-      method: 'PATCH'
+    // Stopping is setting the end; Solidtime has no stop endpoint.
+    await client.request(`/organizations/${workspaceId}/time-entries/${entryId}`, {
+      method: 'PUT',
+      body: makeStopPayload()
     })
     assertCurrentToken(token)
 
@@ -481,11 +503,11 @@ AppSideService(
         .catch((error) => res(friendlyError(error)))
     },
     onSettingsChange({ key, newValue }) {
-      if (key === TOKEN_KEY) {
+      if (key === TOKEN_KEY || key === SERVER_KEY) {
         settingsLib.removeItem(ACCOUNT_KEY)
         settingsLib.removeItem(STATUS_KEY)
         settingsLib.removeItem('connectionError')
-        const token = String(newValue || '').trim()
+        const token = key === TOKEN_KEY ? String(newValue || '').trim() : currentToken()
         if (!token) {
           // Disconnected in Zepp: let the watch fall back to its setup screen.
           this.call({ method: 'SETTINGS_CHANGED' })

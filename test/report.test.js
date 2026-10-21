@@ -125,8 +125,7 @@ test('the timer still running counts towards the week', () => {
 })
 
 /**
- * Counted whole against the week it started in, which is how Toggl's own
- * reports group entries — so a timer left running from last Saturday adds
+ * Counted whole against the week it started in, so a timer left running from last Saturday adds
  * nothing to this week rather than appearing at a length neither week agrees
  * with.
  */
@@ -288,7 +287,7 @@ test('the week tab counts what the month tab is drawing', async () => {
 
 /**
  * The whole point of counting the list already in hand: reaching the week must
- * not cost a request from an hourly allowance worth guarding, or a round trip
+ * not cost a request from a rate budget worth guarding, or a round trip
  * to a phone that may not be in range.
  */
 test('the week tab asks the phone for nothing', async () => {

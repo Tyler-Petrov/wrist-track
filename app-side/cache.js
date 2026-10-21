@@ -1,28 +1,28 @@
 // Extension included deliberately: unlike the rest of app-side/, this module
 // is imported directly by the tests, so Node's ESM resolver has to find it.
-import { HISTORY_LIMIT, entrySummary, historyDay, historySubtitle, parseStart } from './toggl.js'
+import { HISTORY_LIMIT, entrySummary, historyDay, historySubtitle, parseStart } from './solidtime.js'
 
 /**
- * Toggl's Free plan allows 30 API requests per hour per user on a sliding
- * 60-minute window, answering 402 once that is spent. Asking Toggl what is
- * running every time the watch wakes would exhaust that in a few minutes, so
- * the Side Service keeps the last known status and hands it back unless a
- * refresh is both due and affordable.
+ * Solidtime allows 200 API requests a minute per user by default (self-hosted
+ * servers can set their own), answering 429 once that is spent. The web app
+ * and anything else the user runs draw on the same allowance, so the Side
+ * Service holds itself to a fraction of it: it keeps the last known status
+ * and hands it back unless a refresh is both due and affordable.
  *
  * A Side Service cannot hold a socket open — the runtime offers Messaging,
  * Fetch and Settings and nothing else — so a bounded poll is the only way to
  * notice a timer stopped from the phone or the web app.
  */
-export const HOUR_MS = 60 * 60 * 1000
-export const HOURLY_LIMIT = 30
+export const WINDOW_MS = 60 * 1000
+export const WINDOW_LIMIT = 30
 
 /**
- * Starting and stopping must work even at the end of a long session spent
- * staring at the screen, so background refreshes may only ever spend part of
- * the hour's allowance. The rest is held back for whatever the user presses.
+ * Starting and stopping must work even in a minute spent hammering refresh,
+ * so background refreshes may only ever spend part of the window's
+ * allowance. The rest is held back for whatever the user presses.
  */
 export const MUTATION_RESERVE = 12
-export const REFRESH_LIMIT = HOURLY_LIMIT - MUTATION_RESERVE
+export const REFRESH_LIMIT = WINDOW_LIMIT - MUTATION_RESERVE
 
 /** Slightly under FAST_POLL_MS, so a poll arriving on time still refreshes. */
 export const STATUS_MAX_AGE = 12 * 1000
@@ -39,9 +39,9 @@ export const HISTORY_MAX_AGE = 6 * 60 * 60 * 1000
 export const FAST_POLL_MS = 15 * 1000
 export const SLOW_POLL_MS = 60 * 1000
 
-/** Drops the request stamps that have aged out of Toggl's sliding hour. */
+/** Drops the request stamps that have aged out of the sliding minute. */
 export function withinWindow(stamps, now = Date.now()) {
-  const cutoff = now - HOUR_MS
+  const cutoff = now - WINDOW_MS
   return (stamps || []).map(Number).filter((stamp) => stamp > cutoff)
 }
 
@@ -51,7 +51,7 @@ export function recordSpend(stamps, count = 1, now = Date.now()) {
   return kept
 }
 
-/** Background refreshes still affordable inside the current hour. */
+/** Background refreshes still affordable inside the current window. */
 export function refreshAllowance(stamps, now = Date.now()) {
   return Math.max(0, REFRESH_LIMIT - withinWindow(stamps, now).length)
 }
@@ -63,12 +63,12 @@ export function refreshAllowance(stamps, now = Date.now()) {
 export function nextAllowanceAt(stamps, now = Date.now()) {
   const kept = withinWindow(stamps, now).sort((a, b) => a - b)
   if (kept.length < REFRESH_LIMIT) return now
-  return kept[kept.length - REFRESH_LIMIT] + HOUR_MS
+  return kept[kept.length - REFRESH_LIMIT] + WINDOW_MS
 }
 
 /**
- * The watch asks again after this long. Backing off as the hour fills keeps a
- * screen left open from spending the allowance that STOP will need.
+ * The watch asks again after this long. Backing off as the window fills keeps
+ * a burst of requests from spending the allowance that STOP will need.
  */
 export function nextPollDelay(stamps, now = Date.now()) {
   const left = refreshAllowance(stamps, now)
@@ -115,7 +115,7 @@ export function withoutPreset(presets, preset) {
 /**
  * Puts a recording that just finished at the top of the history. Earlier
  * recordings of the same job stay put — they are history, not duplicates —
- * which is exactly what a re-read from Toggl would say.
+ * which is exactly what a re-read from Solidtime would say.
  */
 export function promoteHistory(history, item) {
   return [item, ...(history || [])].slice(0, HISTORY_LIMIT)
@@ -130,11 +130,11 @@ export const MERGE_GRACE_MS = 10 * 60 * 1000
 
 /**
  * A background re-read can land after a stop already wrote its own recording
- * into the cache — Toggl's snapshot was taken before that, so it may not
+ * into the cache — Solidtime's snapshot was taken before that, so it may not
  * mention it yet. Such a recording, matched by job and start since it carries
  * no id, survives the merge rather than being silently overwritten. Only a
  * recording that ended moments ago qualifies, though: a cached row that ended
- * long ago and is absent from the fresh read was deleted in Toggl or aged out
+ * long ago and is absent from the fresh read was deleted in Solidtime or aged out
  * of the window, and keeping it would resurrect it at the top of the list.
  */
 export function mergeFreshHistory(cachedHistory, freshHistory, now = Date.now()) {
@@ -164,7 +164,7 @@ export function entryAsPreset(running) {
 
 /**
  * A recording of the entry that was running, worked out locally: the start is
- * known and the stop is now, so the row Toggl would eventually report can be
+ * known and the stop is now, so the row Solidtime would eventually report can be
  * written without re-reading the month from it.
  */
 export function entryAsHistoryItem(running, now = Date.now()) {
@@ -178,7 +178,7 @@ export function entryAsHistoryItem(running, now = Date.now()) {
 
 /**
  * Re-labelling only changes what an entry is called, never when it started, so
- * the result can be worked out locally instead of re-read from Toggl. The
+ * the result can be worked out locally instead of re-read from Solidtime. The
  * summary line is rebuilt rather than carried, or the card would keep naming
  * the project the entry was moved away from.
  */

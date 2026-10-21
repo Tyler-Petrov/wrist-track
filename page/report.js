@@ -9,7 +9,7 @@
 //
 // All of them count the very list the month tab draws, out of the same reply
 // held in the same state, so the tab costs neither a Bluetooth round trip nor a
-// Toggl request, and it cannot disagree with the recordings next door.
+// Solidtime request, and it cannot disagree with the recordings next door.
 //
 // Each card is as tall as what is in it, and the tab scrolls when they come to
 // more than the panel.

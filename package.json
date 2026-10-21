@@ -1,9 +1,9 @@
 {
-  "name": "wristtrack-for-toggl",
+  "name": "wristtrack-for-solidtime",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "A serverless Toggl Track timer for the Amazfit Bip Max",
+  "description": "A serverless Solidtime timer for the Amazfit Bip Max",
   "scripts": {
     "test": "node --test",
     "build": "zeus build",
