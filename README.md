@@ -6,7 +6,8 @@ Max. Start, stop and re-label Solidtime timers from your wrist.
 ![The ready screen](docs/screens/03-ready.png)
 
 The watch talks over Bluetooth to a Side Service inside the Zepp phone app, and
-that Side Service talks straight to Solidtime's API over HTTPS. There is no
+that Side Service talks straight to Solidtime's API, over HTTPS unless you
+point it at a self-hosted server by an explicit `http://` address. There is no
 server in between and no account to create beyond the Solidtime one you already
 have. It works with the hosted service at app.solidtime.io and with a
 self-hosted server.
@@ -525,6 +526,9 @@ drawn from the same primitives Zepp OS actually provides.
 - Zepp's settings storage is app-local storage, not a hardware-backed vault.
   The token never reaches the watch or a third party, but a compromised phone
   or Zepp app could expose it.
+- A self-hosted server entered as `http://…` receives the token without
+  encryption. The settings page warns when it is; use one only on a server and
+  network you control.
 - Solidtime API tokens act as you, with everything your account can do, and
   last for a long time.
 - Disconnect in Zepp and revoke the token from your Solidtime profile after

@@ -290,6 +290,13 @@ AppSettingsPage({
                 }
               })
             ),
+          // Self-hosting over plain HTTP is allowed, but not silently.
+          !hasToken &&
+            /^http:\/\//i.test(server) &&
+            bodyText('This server address uses HTTP, so your token will be sent without encryption. Use it only on a server and network you control.', {
+              fontSize: '13px',
+              color: COLORS.danger
+            }),
           !hasToken && tokenLink(server),
           !hasToken &&
             field(
