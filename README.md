@@ -1,13 +1,15 @@
 # WristTrack
 
-A serverless Toggl Track timer for the Amazfit Bip Max. Start, stop and
-re-label Toggl timers from your wrist.
+A serverless [Solidtime](https://www.solidtime.io) timer for the Amazfit Bip
+Max. Start, stop and re-label Solidtime timers from your wrist.
 
 ![The ready screen](docs/screens/03-ready.png)
 
 The watch talks over Bluetooth to a Side Service inside the Zepp phone app, and
-that Side Service talks straight to Toggl's API over HTTPS. There is no server
-in between and no account to create beyond the Toggl one you already have.
+that Side Service talks straight to Solidtime's API over HTTPS. There is no
+server in between and no account to create beyond the Solidtime one you already
+have. It works with the hosted service at app.solidtime.io and with a
+self-hosted server.
 
 ## How it works
 
@@ -16,24 +18,26 @@ Amazfit Bip Max device app
         |  ZML over Bluetooth
 Zepp phone app Side Service  ──── shared settings storage ──── Zepp settings UI
         |
-        |  HTTPS with your Toggl token
+        |  HTTPS with your Solidtime API token
         v
-Toggl Track API v9
+Solidtime API v1 (app.solidtime.io, or your own server)
 ```
 
 Only the fields the watch needs to draw a screen cross Bluetooth — description,
-project name, start time. **Your Toggl token never leaves the phone.**
+project name, start time. **Your Solidtime token never leaves the phone.**
 
 The Side Service keeps the last known timer state in Zepp's settings storage
-and answers the watch from it, so the watch and Toggl are not the same
+and answers the watch from it, so the watch and Solidtime are not the same
 question. See [Staying in sync](#staying-in-sync) for why that matters.
 
 ## What it does
 
 - Shows whether a timer is running, with a live elapsed clock.
-- Picks up timers started, stopped or re-labelled somewhere else — the Toggl
-  phone app, the web app, the browser extension — usually within 15 seconds.
-- Starts and stops timers against Toggl Track API v9.
+- Picks up timers started, stopped or re-labelled somewhere else, such as the
+  Solidtime web app or desktop app, usually within 15 seconds.
+- Starts and stops timers against the Solidtime API v1, filing them under your
+  membership in the organization you pick, and marking them billable when the
+  project is.
 - Shows your past month of recordings as a scrolling list, newest first,
   grouped under a heading for each day that has any. Each row says the times
   it ran over and for how long. Tap a recording to start that job again.
@@ -46,31 +50,32 @@ question. See [Staying in sync](#staying-in-sync) for why that matters.
   so they cost no request at all. The two tabs are one page rather than two
   pages, so there is no navigation between them, and two dots at the foot of
   the panel say which one you are on.
-- Handles an empty account, a rejected token, an offline phone and Toggl's
-  hourly API limit, with a readable message for each.
+- Handles an empty account, a rejected token, an offline phone and Solidtime's
+  rate limit, with a readable message for each.
 - No analytics, no ads, no developer-operated data collection.
 
 ## Why setup uses a personal token
 
-Toggl Track publishes no OAuth authorization, token, PKCE or device-code
-endpoints, so there is no way for a third-party app to be granted delegated
-access. Toggl's own browser extension works the same way this does: it signs you
-in on the web, then reads and stores your personal API token.
+Solidtime issues personal API tokens from the profile page, on the hosted
+service and on self-hosted servers alike, so one setup works for both. A Zepp
+settings page is a form, not a browser that can complete a sign-in redirect,
+and a token pasted once is the simplest thing it can hold.
 
-You copy that token from your Toggl profile into Zepp's settings once. It stays
-on the phone, is never sent to the watch or to any server of ours, and you can
-revoke it from Toggl at any time.
+You create that token in your Solidtime profile and paste it into Zepp's
+settings once. It stays on the phone, is never sent to the watch or to any
+server of ours, and you can revoke it from Solidtime at any time.
 
 ## Staying in sync
 
-Stop a timer in the Toggl phone app and the watch should notice. It does, but
-by asking rather than by being told, and Toggl's Free plan allows only **30 API
-requests per hour per user** on a sliding window before it answers 402.
+Stop a timer in the Solidtime web app and the watch should notice. It does, but
+by asking rather than by being told. Solidtime allows **200 API requests a
+minute per user** by default (a self-hosted server can set its own) before it
+answers 429, and the web app and anything else you run draw on that same
+allowance.
 
-There is no push option available here. Toggl publishes no websocket or
-streaming API for third parties, and its webhooks deliver to a public HTTPS
-endpoint, which a phone does not have. Nor could the app hold a connection open
-if one existed: a Zepp OS Side Service is given Messaging, Fetch and Settings
+There is no push option available here. Solidtime publishes no websocket or
+streaming API for third parties. Nor could the app hold a connection open if
+one existed: a Zepp OS Side Service is given Messaging, Fetch and Settings
 and nothing else — there is no `WebSocket` anywhere in the platform SDK — and
 it does not run in the background. Every design here follows from that.
 
@@ -94,9 +99,10 @@ moved backwards counts as no evidence of freshness at all.
 **Nothing runs in the background.** There is no `app-service` registered, so the
 watch has no background process, and the Side Service only wakes when it is
 asked. Polling exists only while the app is open, and stops two minutes after
-the last thing you do — an app left in a pocket must not quietly spend the hour.
+the last thing you do, because an app left in a pocket must not quietly keep
+asking.
 
-The Side Service holds the second cache, and meters what reaches Toggl:
+The Side Service holds the second cache, and meters what reaches Solidtime:
 
 - **Reads are served from cache.** A status check inside a 12-second window
   costs nothing. Opening the app twice in a minute is one request, not four.
@@ -107,32 +113,36 @@ The Side Service holds the second cache, and meters what reaches Toggl:
   running. When the copy does expire, it is served anyway and the re-read runs
   in the background; the refreshed month arrives with a later poll instead of
   making any glance wait.
-- **Background checks may spend only 18 of the 30.** The remaining 12 are held
-  back so start and stop still work at the end of a long session. A screen left
-  open backs off from 15-second to 60-second checks as the hour fills, then
-  stops and says **sync paused** rather than spending a request it cannot
-  afford. `test/cache.test.js` drives an hour of that schedule and asserts the
-  reserve survives.
-- **Actions compute their own result.** Toggl has already confirmed a stop, so
+- **The app holds itself to 30 requests a minute**, well under Solidtime's 200,
+  so it never crowds out the web app. Background checks may spend only 18 of
+  those 30; the other 12 are held back so start and stop still work in the
+  middle of a burst. As the minute fills, checks back off from every 15 seconds
+  to every 60, then stop and say **sync paused** rather than spending a request
+  they cannot afford. Ordinary polling costs 4 a minute and never comes close.
+  `test/cache.test.js` drives an hour of that schedule and a deliberate burst,
+  and asserts the reserve survives both.
+- **Actions compute their own result.** Solidtime has already confirmed a stop, so
   the finished run is written to the top of the history locally — its start is
   known and its stop is now — instead of re-reading the month. Stopping and
-  re-labelling cost one request each, down from two and three; starting costs
-  two, down from three. A stop noticed from elsewhere gets the same local
+  re-labelling cost one request each; starting costs two, one to check nothing
+  is already running and one to start. A stop noticed from elsewhere gets the same local
   write, plus a background re-read to catch anything else tracked away from
   the watch.
 - **The job list is cached whole.** Keeping the running job out of it is done on
   the way to the watch, not in the cache. Written back, that removal would be
   permanent: every job that ran would drop out of the list until the next
   recent-entries read, and re-labelling away from one would never offer it back.
-- **Starting always asks Toggl anyway.** The one place the cache is deliberately
+- **Starting always asks Solidtime anyway.** The one place the cache is deliberately
   not trusted. A timer begun on the phone seconds ago may not have been polled
   yet, and starting a second one over it corrupts the time log — which is worth
   more than the request it would save.
 
 Measured against about thirty ten-second glances a day, which is the pattern
-this is tuned for, that comes to **36 requests across the whole day**, and a
-heavy hour of ten glances spends **12 of the 18** allowed. `test/side-service.test.js`
-drives both of those against the real code.
+this is tuned for, that comes to **42 requests across the whole day**. The
+worst single glance costs five: the one where the six-hour account cache has
+expired and the user, their organizations and the projects are read again.
+`test/side-service.test.js` drives that day against the real code, and a burst
+of polls in one minute that cannot get past the 18 allowed.
 
 Worth being precise about where the win is: a glance half an hour after the
 last one costs one request — the status check — because the month of history
@@ -202,14 +212,19 @@ from — a fresh clone or a new git worktree, where `node_modules` is gitignored
 Skipping it builds a package that installs happily and then shows nothing but a
 black screen; see *A black screen after install* below.
 
-## 3. Connect your Toggl account
+## 3. Connect your Solidtime account
 
 1. In Zepp, open **Profile → Amazfit Bip Max → App Settings → WristTrack**.
-2. Tap **Open Toggl profile to get token →** and sign in if asked.
-3. Copy the **API token** from the bottom of the Toggl profile page.
-4. Paste it into **API token** and wait for **Signed in as …**.
-5. Optionally set a default description, workspace and project. These are only
-   used as a starting point when your account has no history yet.
+2. If you self-host Solidtime, type your server's address into **Server**, for
+   example `time.example.com`. Leave it blank for app.solidtime.io.
+3. Tap **Open Solidtime profile to get token →** and sign in if asked.
+4. Under **API Tokens**, create a token and copy it. Solidtime only shows it
+   once.
+5. Paste it into **API token** and wait for **Signed in as …**.
+6. Optionally set a default description, organization and project. The
+   organization is also where the watch reads history from and starts timers
+   in; the description and project are only a starting point when your account
+   has no history yet.
 
 ## 4. Use it
 
@@ -312,9 +327,9 @@ tab lights, and that a swipe with nowhere to go is left to the system.
 
 The week is Sunday to Saturday in the watch's local time, not a rolling seven
 days, and today is midnight to midnight. A recording belongs whole to the
-stretch it *started* in — which is how Toggl's own reports group entries, so the
-two agree about a session that ran past midnight, and a timer left running
-overnight belongs to yesterday, which is what it is. A timer still running
+stretch it *started* in, so a session that ran past midnight is never split
+across two cards, and a timer left running overnight belongs to yesterday,
+which is what it is. A timer still running
 counts the time it has run so far, into both cards when it started today.
 
 The payroll cycles run from the 11th to the 25th, and from the 26th to the 10th
@@ -335,8 +350,8 @@ range says it once rather than four times over.
 One limit worth knowing: the watch holds the past month, capped at fifty
 recordings. A week is never near that, but a payroll cycle is half a month, so a
 busy one can in principle reach back past the oldest recording the watch still
-has. The figure is a report on what the watch holds, not an audit of the Toggl
-account.
+has. The figure is a report on what the watch holds, not an audit of the
+Solidtime account.
 
 Each card is as tall as what is in it: every project of that stretch gets a
 line, so the lines always sum to the figure above them and nothing is quietly
@@ -345,7 +360,7 @@ the bar with the dots comes along at the end of the content rather than hanging
 over the middle of a card. The month tab never scrolls that way — what is long
 about it is the list, and a list scrolls inside its own box.
 
-Nothing is asked of the phone or of Toggl to produce it. Being tabs of one page,
+Nothing is asked of the phone or of Solidtime to produce it. Being tabs of one page,
 the week counts the very list the month tab draws, out of the same reply held in
 the same state, so the report is free, it works with the phone out of range, it
 cannot spend a request that stopping a timer might need, and the two tabs cannot
@@ -366,18 +381,19 @@ total either.
 
 | What you see | What it means |
 | --- | --- |
-| **Connect Toggl** | No token saved yet. Finish step 3. |
-| **Token rejected. Update it in Zepp settings.** | Toggl returned 401 or 403 — the token was mistyped or has been revoked. Paste it again. |
-| **Toggl hourly API limit reached.** | Toggl returned 402. The free plan allows 30 requests per hour per user on a sliding window, plus a separate 30/hour per workspace. Normal use is nowhere near this. |
-| **Sync paused · last known** | Not an error. The hour's background allowance is spent, so the phone is showing the last state it confirmed. Start and stop still work. See [Staying in sync](#staying-in-sync). |
+| **Connect Solidtime** | No token saved yet. Finish step 3. |
+| **Token rejected. Update it in Zepp settings.** | Solidtime returned 401 or 403. The token was mistyped, has been revoked, or belongs to a different server than the one in **Server**. Disconnect and paste it again. |
+| **Sync paused · last known** | Not an error. The minute's background allowance is spent, so the phone is showing the last state it confirmed. Start and stop still work. See [Staying in sync](#staying-in-sync). |
 | **Checking** | Not an error. The watch has drawn its saved screen and is waiting on the phone, normally for about a second. It clears itself. |
 | **Syncing**, with a line under it | The watch had nothing saved to draw, and the line says why: `nothing saved yet` after an install, `held back, saved 190m ago` for a running timer past its hour, or `watch storage failed …` if `@zos/storage` is not working. Only the last is a fault — `permission denied` there means `device:os.local_storage` is missing from `app.json`. |
-| **Toggl is rate limiting. Try again shortly.** | Toggl returned 429, its short-term burst limiter. Wait a moment. |
-| **Toggl is having trouble. Try again shortly.** | A 5xx from Toggl. Not your fault. |
-| **Phone is offline or Toggl is unavailable.** | The phone lost its data connection, or Bluetooth to the watch dropped. |
-| **A timer is already running.** | Toggl already has a running entry. Refresh to pick it up. |
+| **Solidtime is rate limiting. Try again shortly.** | Solidtime returned 429. Something else on the account, or a self-hosted server with a low limit, has used up the minute. Wait a moment. |
+| **Solidtime is having trouble. Try again shortly.** | A 5xx from Solidtime. Not your fault. |
+| **Phone is offline or Solidtime is unavailable.** | The phone lost its data connection, Bluetooth to the watch dropped, or a self-hosted server is down. |
+| **Solidtime could not find that. Refresh and try again.** | A 404, usually an entry deleted from the web app while the watch still showed it. |
+| **That server did not answer like Solidtime.** | Shown in Zepp settings. The **Server** address points at something that is not a Solidtime API. |
+| **A timer is already running.** | Solidtime already has a running entry. Refresh to pick it up. |
 | **Phone link is still starting.** | The watch app opened before the phone connection was ready. Press the button again. |
-| **Nothing tracked yet** | No entries in the last month. Track something once, from Toggl or the watch. |
+| **Nothing tracked yet** | No entries in the last month. Track something once, from Solidtime or the watch. |
 | **Nothing tracked** on the week tab | The month has recordings, but none since Sunday. |
 | **Nothing synced yet** on the week tab | Nothing has arrived to count yet. The month tab next door is showing the spinner or an error for the same reason. |
 
@@ -435,12 +451,13 @@ npm run screens       # regenerate docs/screens/ from the real page code
 npm run build         # write a .zab into dist/
 ```
 
-`test/toggl.test.js` covers the Toggl request layer. `test/cache.test.js` covers
-the request budget and the local cache arithmetic. `test/side-service.test.js`
-runs the real `app-side` code against a stubbed Toggl and asserts what each
-action actually costs — that a repeat status read reaches Toggl zero times, a
-due poll once, stop and re-label once each, and start twice. It also replays a
-day of glances and a busy hour against the budget. `test/page.test.js` covers
+`test/solidtime.test.js` covers the Solidtime request layer. `test/cache.test.js`
+covers the request budget and the local cache arithmetic.
+`test/side-service.test.js` runs the real `app-side` code against a stubbed
+Solidtime and asserts what each action actually costs (a repeat status read
+reaches Solidtime zero times, a due poll once, stop and re-label once each, and
+start twice) and what each one sends. It also replays a day of glances and
+a busy minute against the budget. `test/page.test.js` covers
 the watch-side copy — that a launch draws it rather than the spinner, that a
 three-day-old running timer is withheld while a three-day-old job list is not,
 that a corrupt one falls back safely, and that polling stops when the app is
@@ -454,9 +471,9 @@ stays inside the panel, clears the rounded corners, and gives each button a
 handler — it has already caught a button clipped by the corner radius that would
 otherwise have shipped.
 
-`node tools/check-toggl.mjs <token>` exercises the Toggl layer against the live
-API: it reads your account and the running entry, and builds the same presets
-the watch uses.
+`node tools/check-solidtime.mjs <token> [server]` exercises the Solidtime layer
+against the live API without changing anything: it reads your account and the
+running entry, and builds the same history the watch uses.
 
 ## The simulator
 
@@ -493,10 +510,8 @@ drawn from the same primitives Zepp OS actually provides.
 1. Create the app at <https://console.zepp.com/> and put the assigned numeric ID
    in `app.appId`. The current `1000011` is still a placeholder.
 2. Set `app.vender` to your publisher name.
-3. **Replace the icon.** It is currently Toggl's own brand mark, taken from
-   their favicon. Toggl's media toolkit asks that their logo be used as-is and
-   not in a way that implies endorsement or collaboration. That is fine for a
-   personal side-loaded build; it is not fine for a store listing.
+3. Review the icon. It is original artwork drawn by `tools/make-icons.mjs`; see
+   `docs/icon.md`.
 4. Put a real support address in `PRIVACY.md`, and review `STORE.md`.
 5. `npm test && npm run build`, then test the `.zab` against invalid token, no
    timer, existing timer, offline phone, disconnected Bluetooth, and token
@@ -510,15 +525,16 @@ drawn from the same primitives Zepp OS actually provides.
 - Zepp's settings storage is app-local storage, not a hardware-backed vault.
   The token never reaches the watch or a third party, but a compromised phone
   or Zepp app could expose it.
-- Toggl API tokens are broad, long-lived credentials with no scopes.
-- Disconnect in Zepp and rotate the token from Toggl after losing a phone.
+- Solidtime API tokens act as you, with everything your account can do, and
+  last for a long time.
+- Disconnect in Zepp and revoke the token from your Solidtime profile after
+  losing a phone.
 - Do not put the token in a QR code. QR images are trivial to capture and a
-  Toggl token is reusable.
+  Solidtime token is reusable.
 
 ## References
 
 - Zepp OS quick start: <https://docs.zepp.com/docs/guides/quick-start/>
 - Zepp device list: <https://docs.zepp.com/docs/reference/related-resources/device-list/>
-- Toggl authentication: <https://engineering.toggl.com/docs/track/authentication/>
-- Toggl time entries: <https://engineering.toggl.com/docs/track/api/time_entries/>
-- Toggl API limits: <https://support.toggl.com/en-us/article/api-webhook-limits-85auc8/>
+- Solidtime API reference: <https://app.solidtime.io/docs/api>
+- Solidtime API source, routes and validation rules: <https://github.com/solidtime-io/solidtime>

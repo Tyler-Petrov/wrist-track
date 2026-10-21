@@ -1,6 +1,15 @@
-const PROFILE_URL = 'https://track.toggl.com/profile'
+// Mirrors normalizeServer() in app-side/solidtime.js. The settings bundle is
+// built on its own, so it does not import from the Side Service.
+const DEFAULT_SERVER = 'https://app.solidtime.io'
 
-// Toggl Track's palette, same ground and mark the watch face uses (page/theme.js).
+function normalizeServer(value) {
+  let server = String(value || '').trim()
+  if (!server) return DEFAULT_SERVER
+  if (!/^https?:\/\//i.test(server)) server = `https://${server}`
+  return server.replace(/\/+$/, '').replace(/\/api(\/v1)?$/i, '')
+}
+
+// The app's palette, same ground and mark the watch face uses (page/theme.js).
 // The phone settings sheet is a light surface, so the pink is darkened for text
 // contrast and the full-strength pink is kept for the dark hero only.
 const COLORS = {
@@ -156,8 +165,9 @@ function step(index, text) {
   ])
 }
 
-function tokenLink() {
-  return Link({ source: PROFILE_URL }, [
+// API tokens are created at the bottom of the Solidtime profile page.
+function tokenLink(server) {
+  return Link({ source: `${server}/user/profile` }, [
     View(
       {
         style: {
@@ -171,7 +181,7 @@ function tokenLink() {
           marginBottom: '14px'
         }
       },
-      [Text({ style: { color: COLORS.pinkInk, fontSize: '14px', fontWeight: '600' } }, 'Open Toggl profile to get token  →')]
+      [Text({ style: { color: COLORS.pinkInk, fontSize: '14px', fontWeight: '600' } }, 'Open Solidtime profile to get token  →')]
     )
   ])
 }
@@ -197,8 +207,10 @@ function detailRow(label, value) {
 AppSettingsPage({
   build(props) {
     const { settingsStorage } = props
-    const hasToken = Boolean(String(settingsStorage.getItem('togglToken') || '').trim())
-    const account = readJson(settingsStorage, 'togglAccount', null)
+    const hasToken = Boolean(String(settingsStorage.getItem('solidtimeToken') || '').trim())
+    const server = normalizeServer(settingsStorage.getItem('solidtimeServer'))
+    const host = server.replace(/^https?:\/\//i, '')
+    const account = readJson(settingsStorage, 'solidtimeAccount', null)
     const workspaces = account ? account.workspaces : []
     const savedWorkspaceId = settingsStorage.getItem('workspaceId') || (account && String(account.defaultWorkspaceId))
     // Keep the select on a real option; a value with no match renders blank and
@@ -243,7 +255,7 @@ AppSettingsPage({
                 color: COLORS.pink,
                 margin: '0 0 8px'
               }
-            }, 'Toggl Track · Watch app'),
+            }, 'Solidtime · Watch app'),
             Text({
               paragraph: true,
               style: { fontSize: '26px', fontWeight: '800', color: COLORS.onDeep, margin: '0 0 8px' }
@@ -251,18 +263,34 @@ AppSettingsPage({
             Text({
               paragraph: true,
               style: { fontSize: '14px', lineHeight: '1.5', color: COLORS.onDeepMuted, margin: '0' }
-            }, 'Start and stop timers from your watch. Your phone talks to Toggl directly, so this app has no server of its own.'),
+            }, 'Start and stop timers from your watch. Your phone talks to Solidtime directly, so this app has no server of its own.'),
             status
           ]
         ),
 
-        card(hasToken ? 'Toggl account' : 'Connect Toggl', [
+        card(hasToken ? 'Solidtime account' : 'Connect Solidtime', [
           // Once a token is saved there is no replace field: disconnecting wipes
           // it and drops straight back to this card's connect flow.
-          !hasToken && step(1, 'Open your Toggl profile and copy the API token at the bottom of the page.'),
-          !hasToken && step(2, 'Paste it below. It is saved on this phone only.'),
+          !hasToken && step(1, 'Self-hosting Solidtime? Enter your server address first. Otherwise leave it blank.'),
+          !hasToken && step(2, 'Open your Solidtime profile and create an API token under API Tokens.'),
+          !hasToken && step(3, 'Paste it below. It is saved on this phone only.'),
           !hasToken && View({ style: { height: '4px' } }),
-          !hasToken && tokenLink(),
+          !hasToken &&
+            field(
+              'Server',
+              'Leave blank for app.solidtime.io.',
+              TextInput({
+                style: { width: '100%' },
+                placeholder: 'app.solidtime.io',
+                value: settingsStorage.getItem('solidtimeServer') || '',
+                onChange: (value) => {
+                  const typed = String(value || '').trim()
+                  if (typed) settingsStorage.setItem('solidtimeServer', normalizeServer(typed))
+                  else settingsStorage.removeItem('solidtimeServer')
+                }
+              })
+            ),
+          !hasToken && tokenLink(server),
           !hasToken &&
             field(
               'API token',
@@ -275,12 +303,13 @@ AppSettingsPage({
                   const token = String(value || '').trim()
                   if (!token) return
                   settingsStorage.removeItem('connectionError')
-                  settingsStorage.setItem('togglToken', token)
+                  settingsStorage.setItem('solidtimeToken', token)
                 }
               })
             ),
           account && detailRow('Signed in as', account.fullname),
-          account && workspaces.length > 0 && detailRow('Workspaces', String(workspaces.length)),
+          hasToken && detailRow('Server', host),
+          account && workspaces.length > 0 && detailRow('Organizations', String(workspaces.length)),
           hasToken &&
             bodyText(
               error
@@ -302,8 +331,8 @@ AppSettingsPage({
                 fontWeight: '600'
               },
               onClick: () => {
-                settingsStorage.removeItem('togglToken')
-                settingsStorage.removeItem('togglAccount')
+                settingsStorage.removeItem('solidtimeToken')
+                settingsStorage.removeItem('solidtimeAccount')
                 settingsStorage.removeItem('connectionError')
               }
             })
@@ -311,7 +340,7 @@ AppSettingsPage({
 
         hasToken &&
           card('Timer defaults', [
-            bodyText('The watch shows your past month of Toggl recordings. These defaults only kick in when there is no history yet.'),
+            bodyText('The watch shows your past month of Solidtime recordings. These defaults only kick in when there is no history yet.'),
             field(
               'Default description',
               null,
@@ -325,7 +354,7 @@ AppSettingsPage({
             ),
             workspaces.length > 0 &&
               field(
-                'Workspace',
+                'Organization',
                 null,
                 Select({
                   style: { width: '100%' },
@@ -354,9 +383,9 @@ AppSettingsPage({
           ]),
 
         card('How credentials are handled', [
-          bodyText('Your token stays in Zepp settings on this phone, and is sent only to api.track.toggl.com over HTTPS.', { margin: '0 0 8px' }),
+          bodyText(`Your token stays in Zepp settings on this phone, and is sent only to ${host}.`, { margin: '0 0 8px' }),
           bodyText('The watch receives timer details, never the token.', { margin: '0 0 8px' }),
-          bodyText('Toggl does not offer OAuth or QR device sign-in for third-party apps, so a personal token is the only safe option.', { margin: '0' })
+          bodyText('A personal API token works the same on the hosted service and on a self-hosted server. You can revoke it from your Solidtime profile at any time.', { margin: '0' })
         ])
       ].filter(Boolean)
     )

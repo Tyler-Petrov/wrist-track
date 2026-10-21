@@ -304,8 +304,8 @@ test('the history stays on screen while a timer runs', async () => {
 /**
  * The history includes the running job's own past recordings — for somebody
  * tracking one job all month, that is the entire list. Tapping one names the
- * job that is already running, which Toggl would accept while changing
- * nothing, so it must not spend a request from the hour's allowance.
+ * job that is already running, which Solidtime would accept while changing
+ * nothing, so it must not spend a request from the rate budget.
  */
 test('tapping a recording of the job already running does nothing', async () => {
   const sameJob = {
@@ -373,7 +373,7 @@ test('the screen says whether it has been confirmed, and how stale it may be', a
   page.state.stale = false
   assert.equal(page.statusNote(), 'Checking')
 
-  // Budget exhaustion resolves when the hour turns over, not in a second, so
+  // Budget exhaustion resolves when the window turns over, not in a second, so
   // it must not read the same as an unconfirmed restore.
   page.state.checking = false
   page.state.stale = true
@@ -394,7 +394,7 @@ test('a reply is written back, so the next launch has something to draw', async 
   assert.ok(Number.isFinite(written.savedAt), 'the age has to be recorded, or it cannot be judged')
 
   // An unconfigured reply is not worth restoring into; it would show a
-  // "Connect Toggl" screen to somebody who is already connected.
+  // "Connect Solidtime" screen to somebody who is already connected.
   page.saveStatus({ configured: false, running: null, presets: [] })
   assert.deepEqual(
     JSON.parse(localStorage.getItem(STATUS_KEY, '')).status,
@@ -496,7 +496,7 @@ test('recordings group under one centred heading per day, tracked days only', as
  * as the current build draws it.
  */
 test('the days stay newest first, while each day runs earliest to latest', async () => {
-  // Arrives newest first, the way Toggl and the phone cache hold it.
+  // Arrives newest first, the way Solidtime and the phone cache hold it.
   const page = await makePage({
     status: {
       ...SAVED,

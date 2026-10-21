@@ -1,8 +1,7 @@
-`icon.png` is Toggl Track's official brand mark, taken unmodified from
-https://track.toggl.com/favicon.ico and rescaled, with the area around the disc
-left transparent. Zeus resizes it to 124x124 for the Bip Max at build time.
+`icon.png` is original artwork: an accent-pink clock face with dark hands,
+drawn by `tools/make-icons.mjs` in the app's own palette (`page/theme.js`). The
+same script writes `favicon.png` at the root and the play and stop marks. Zeus
+resizes it to 124x124 for the Bip Max at build time.
 
-Toggl's media toolkit asks that the logo be used as is and not in a way that
-suggests endorsement by or collaboration with Toggl. That is fine for a
-personal side-loaded build; replace this icon with original artwork before
-publishing to the Zepp app store.
+It borrows no third-party brand mark, so it is fine to ship in a store listing.
+Run `node tools/make-icons.mjs` after changing it.

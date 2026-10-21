@@ -38,7 +38,7 @@ export const y = (value) => originY + Math.round(value * scale)
 export const GUTTER = 34
 export const CONTENT_WIDTH = REFERENCE_WIDTH - GUTTER * 2
 
-// Toggl Track's own palette: #2c1338 ground, #e57cd8 mark.
+// The app's palette: #2c1338 ground, #e57cd8 mark.
 export const COLORS = {
   background: 0x2c1338,
   surface: 0x3d1c4c,

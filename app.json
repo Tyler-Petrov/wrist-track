@@ -11,7 +11,7 @@
     "_pikeCompatibled": 1,
     "icon": "icon.png",
     "vender": "Community",
-    "description": "A serverless wrist timer for Toggl Track"
+    "description": "A serverless wrist timer for Solidtime"
   },
   "runtime": {
     "apiVersion": {
